@@ -164,6 +164,14 @@ echo ""
 echo "Installing vLLM build dependencies..."
 pip install wheel packaging ninja cmake numpy setuptools-scm
 
+# amdsmi = AMD System Management Interface. vLLM needs this at runtime
+# to detect ROCm GPUs. Try pip first, fall back to the ROCm install path.
+echo "Installing amdsmi (AMD GPU management library)..."
+pip install amdsmi 2>/dev/null || pip install /opt/rocm/share/amd_smi/ 2>/dev/null || {
+    echo "WARNING: Could not install amdsmi. vLLM may fail to detect ROCm GPUs."
+    echo "         Try: pip install /opt/rocm/share/amd_smi/"
+}
+
 VLLM_SRC="/tmp/vllm-rocm-build-$$"
 echo ""
 echo "Cloning vLLM source to $VLLM_SRC ..."
