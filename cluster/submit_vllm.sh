@@ -21,19 +21,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Defaults ──────────────────────────────────────────────────
-PARTITION="${PARTITION:-gpu-troja}"
+PARTITION="${PARTITION:-gpu-amd}"
 NODE="${NODE:-}"                        # empty = let Slurm pick
-GPUS="${GPUS:-1}"
-CPUS="${CPUS:-8}"
+GPUS="${GPUS:-8}"
+CPUS="${CPUS:-16}"
 MEM="${MEM:-0}"                        # 0 = all available (DP>1 loads multiple model copies concurrently)
-TIME="${TIME:-8:00:00}"                 # 8 hours default
+TIME="${TIME:-30-00}"                    # 30 days default (persistent serving)
 JOB_NAME="${JOB_NAME:-vllm-serve}"
 
 # vLLM parameters (passed through to run_vllm.sh)
-MODEL="${MODEL:-google/gemma-3-27b-it}"
+MODEL="${MODEL:-google/gemma-3-12b-it}"
 PORT="${PORT:-8421}"
 TP="${TP:-1}"
-DP="${DP:-1}"
+DP="${DP:-8}"
 
 # Parse CLI overrides
 while [[ $# -gt 0 ]]; do
@@ -74,6 +74,7 @@ cat > "$SBATCH_SCRIPT" << SBATCH_EOF
 #SBATCH -c ${CPUS}
 #SBATCH --mem=${MEM}
 #SBATCH --time=${TIME}
+#SBATCH -x dll-4gpu5
 #SBATCH -o ${SCRIPT_DIR}/logs/vllm_%j.out
 #SBATCH -e ${SCRIPT_DIR}/logs/vllm_%j.err
 ${NODE_FLAG}

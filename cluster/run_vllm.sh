@@ -283,6 +283,7 @@ SERVE_ARGS=(
     --max-num-seqs "$MAX_NUM_SEQS"
     --dtype "$DTYPE"
     --trust-remote-code
+    --enable-prefix-caching
 )
 
 if [ "$ENFORCE_EAGER" = "true" ]; then
