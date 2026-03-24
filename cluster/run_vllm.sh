@@ -38,9 +38,9 @@ MAX_NUM_SEQS="${MAX_NUM_SEQS:-256}"
 TENSOR_PARALLEL="${TENSOR_PARALLEL:-2}"   # GPUs per replica
 DATA_PARALLEL="${DATA_PARALLEL:-4}"       # Number of replicas
 DTYPE="${DTYPE:-auto}"
-# ROCm: torch.compile/Inductor fails with 'cluster_dims' error.
-# Enforce eager mode until this is fixed upstream.
-ENFORCE_EAGER="${ENFORCE_EAGER:-true}"
+# "auto" = eager on ROCm (torch.compile broken), compiled on NVIDIA.
+# Override with --enforce-eager / --no-enforce-eager.
+ENFORCE_EAGER="${ENFORCE_EAGER:-auto}"
 
 # Where to cache HuggingFace model weights (large! ~54 GB for 27B)
 WORK_BASE="/lnet/work/people/$USER"
@@ -86,39 +86,67 @@ echo "  vLLM env:   $VLLM_ENV"
 echo "  Started:    $(date)"
 echo "======================================================"
 
-# ── ROCm environment ─────────────────────────────────────────
-# ROCm is AMD's GPU compute stack (like NVIDIA's CUDA).
-# These paths let the system find the AMD GPU libraries.
+# ── GPU environment (auto-detect NVIDIA vs AMD) ──────────────
 
-export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64/:"${LD_LIBRARY_PATH:-}"
-export PATH=/opt/rocm/bin:"$PATH"
-export VLLM_TARGET_DEVICE=rocm
-# Completely disable torch.compile/TorchDynamo in all subprocesses.
-# --enforce-eager alone doesn't propagate to worker procs, and the Inductor
-# autotuner crashes on ROCm with 'KernelMetadata.cluster_dims' error.
-export TORCHDYNAMO_DISABLE=1
+GPU_SLURM="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
 
-# Tell vLLM which GPUs to use. Slurm assigns specific GPU IDs to our job
-# via SLURM_STEP_GPUS (interactive srun) or SLURM_JOB_GPUS (sbatch).
-# vLLM reads HIP_VISIBLE_DEVICES (AMD's equivalent of CUDA_VISIBLE_DEVICES).
-export HIP_VISIBLE_DEVICES="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
-unset ROCR_VISIBLE_DEVICES 2>/dev/null || true
+if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
+    # ── NVIDIA (CUDA) ──
+    GPU_VENDOR="nvidia"
+    export CUDA_VISIBLE_DEVICES="${GPU_SLURM:-}"
+    echo "GPU vendor:  NVIDIA (CUDA)"
+    echo "GPUs visible: ${CUDA_VISIBLE_DEVICES:-'(all — not in Slurm?)'}"
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true
 
-echo "ROCm path:   /opt/rocm"
-echo "GPUs visible: ${HIP_VISIBLE_DEVICES:-'(all — not in Slurm?)'}"
+elif [ -d /opt/rocm ]; then
+    # ── AMD (ROCm) ──
+    GPU_VENDOR="rocm"
+    export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64/:"${LD_LIBRARY_PATH:-}"
+    export PATH=/opt/rocm/bin:"$PATH"
+    export VLLM_TARGET_DEVICE=rocm
+    # Completely disable torch.compile/TorchDynamo in all subprocesses.
+    # --enforce-eager alone doesn't propagate to worker procs, and the Inductor
+    # autotuner crashes on ROCm with 'KernelMetadata.cluster_dims' error.
+    export TORCHDYNAMO_DISABLE=1
+    export HIP_VISIBLE_DEVICES="${GPU_SLURM:-}"
+    unset ROCR_VISIBLE_DEVICES 2>/dev/null || true
+    echo "GPU vendor:  AMD (ROCm)"
+    echo "GPUs visible: ${HIP_VISIBLE_DEVICES:-'(all — not in Slurm?)'}"
+    rocm-smi --showid --showtemp --showuse 2>/dev/null || echo "WARNING: rocm-smi not available"
 
-# Show GPU info
-rocm-smi --showid --showtemp --showuse 2>/dev/null || echo "WARNING: rocm-smi not available"
+else
+    GPU_VENDOR="unknown"
+    echo "WARNING: No GPU runtime detected (no nvidia-smi, no /opt/rocm)"
+fi
+
+# Resolve enforce-eager: ROCm needs it (torch.compile broken), NVIDIA doesn't.
+if [ "$ENFORCE_EAGER" = "auto" ]; then
+    if [ "$GPU_VENDOR" = "rocm" ]; then
+        ENFORCE_EAGER=true
+        echo "Enforce eager: ON (auto — ROCm torch.compile workaround)"
+    else
+        ENFORCE_EAGER=false
+        echo "Enforce eager: OFF (auto — NVIDIA torch.compile works)"
+    fi
+fi
 
 # ── Python environment ───────────────────────────────────────
 
-OWN_VENV="$WORK_BASE/.venvs/llm-services-vllm-rocm"
+OWN_VENV_ROCM="$WORK_BASE/.venvs/llm-services-vllm-rocm"
+OWN_VENV_CUDA="$WORK_BASE/.venvs/llm-services-vllm-cuda"
 HRABAL_VENV="/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1"
+
+# Pick the right venv based on GPU vendor
+if [ "$GPU_VENDOR" = "nvidia" ]; then
+    OWN_VENV="$OWN_VENV_CUDA"
+else
+    OWN_VENV="$OWN_VENV_ROCM"
+fi
 
 if [ "$VLLM_ENV" = "auto" ]; then
     if [ -d "$OWN_VENV" ]; then
         VENV_PATH="$OWN_VENV"
-        echo "Using your own venv (auto-detected)"
+        echo "Using your own venv (auto-detected: $GPU_VENDOR)"
     elif [ -d "$HRABAL_VENV" ]; then
         VENV_PATH="$HRABAL_VENV"
         echo "Using Hrabal's venv (auto-fallback; run setup_env.sh to create your own)"
