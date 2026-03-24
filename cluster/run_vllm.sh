@@ -93,6 +93,10 @@ echo "======================================================"
 export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64/:"${LD_LIBRARY_PATH:-}"
 export PATH=/opt/rocm/bin:"$PATH"
 export VLLM_TARGET_DEVICE=rocm
+# Completely disable torch.compile/TorchDynamo in all subprocesses.
+# --enforce-eager alone doesn't propagate to worker procs, and the Inductor
+# autotuner crashes on ROCm with 'KernelMetadata.cluster_dims' error.
+export TORCHDYNAMO_DISABLE=1
 
 # Tell vLLM which GPUs to use. Slurm assigns specific GPU IDs to our job
 # via SLURM_STEP_GPUS (interactive srun) or SLURM_JOB_GPUS (sbatch).
