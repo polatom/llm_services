@@ -3,10 +3,8 @@
 # One-time setup: create your own Python venv with vLLM for
 # AMD MI210 GPUs (ROCm) on the UFAL LRC cluster.
 #
-# WHY: Hrabal's pre-compiled vLLM env works (Option A in README),
-# but if you want your own independent environment — e.g. to pin
-# a specific version or not depend on someone else's home dir —
-# this script creates one under /lnet/work/people/$USER/.
+# Creates an independent venv under /lnet/work/people/$USER/
+# with PyTorch (ROCm) and vLLM compiled for AMD GPUs.
 #
 # IMPORTANT: Run this on a GPU node (inside an srun job), NOT on
 # the login node. The ROCm libraries at /opt/rocm are only
@@ -18,6 +16,8 @@
 #      srun -p gpu-amd -c 16 -G 2 --mem=32G -t 2:00:00 --pty bash
 #   2. Run this script:
 #      bash setup_env.sh
+#   3. Then launch vLLM:
+#      bash run_vllm.sh
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -27,14 +27,14 @@ set -euo pipefail
 # to avoid filling the home directory quota.
 
 WORK_BASE="/lnet/work/people/$USER"
-VENV_DIR="${VENV_DIR:-$WORK_BASE/.venvs/sprint-vllm-rocm}"
+VENV_DIR="${VENV_DIR:-$WORK_BASE/.venvs/llm-services-vllm-rocm}"
 
 export PIP_CACHE_DIR="$WORK_BASE/.cache/pip"
 export HF_HOME="$WORK_BASE/.cache/huggingface"
 mkdir -p "$PIP_CACHE_DIR" "$HF_HOME"
 
 echo "======================================================"
-echo "  SPRINT vLLM — ROCm Environment Setup"
+echo "  LLM Services — ROCm Environment Setup"
 echo "  venv:      $VENV_DIR"
 echo "  pip cache: $PIP_CACHE_DIR"
 echo "  HF cache:  $HF_HOME"
@@ -103,24 +103,57 @@ source "$VENV_DIR/bin/activate"
 echo "Upgrading pip..."
 pip install --upgrade pip setuptools wheel
 
-# ── Step 5: Install PyTorch for ROCm ─────────────────────────
-# Standard PyTorch wheels are CUDA-only. For AMD GPUs we need the
-# ROCm build. The --index-url points to PyTorch's ROCm wheel repo.
-# rocm6.2 is the closest match to the cluster's ROCm 6.4.1.
+# ── Step 5: Detect ROCm version ───────────────────────────────
+# Match PyTorch ROCm wheel to the installed ROCm version.
+
+ROCM_VER=$(cat /opt/rocm/.info/version 2>/dev/null | head -1 | tr -d '[:space:]')
+ROCM_MAJOR_MINOR=$(echo "$ROCM_VER" | grep -oP '^\d+\.\d+')
 
 echo ""
-echo "Installing PyTorch for ROCm..."
-pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.2
+echo "ROCm version: $ROCM_VER (major.minor: $ROCM_MAJOR_MINOR)"
 
-# ── Step 6: Install vLLM ─────────────────────────────────────
-# pip install vllm may install a CUDA wheel. If it doesn't detect
-# ROCm correctly, you'll need to build from source (see below).
+# Map cluster ROCm to closest available PyTorch ROCm wheel.
+# PyTorch publishes wheels for specific ROCm versions (6.2, 6.3, etc.).
+# Pick the closest match that doesn't exceed the installed version.
+case "$ROCM_MAJOR_MINOR" in
+    6.4|6.5|6.6) PYTORCH_ROCM="rocm6.4" ;;
+    6.3)         PYTORCH_ROCM="rocm6.3" ;;
+    6.2)         PYTORCH_ROCM="rocm6.2" ;;
+    6.1|6.0)     PYTORCH_ROCM="rocm6.2" ;;
+    *)           PYTORCH_ROCM="rocm6.2"
+                 echo "WARNING: Unrecognized ROCm $ROCM_MAJOR_MINOR, defaulting to rocm6.2 wheels" ;;
+esac
+
+echo "Using PyTorch index: $PYTORCH_ROCM"
+
+# ── Step 6: Install PyTorch for ROCm ─────────────────────────
+# Standard PyTorch wheels are CUDA-only. For AMD GPUs we need the
+# ROCm build from PyTorch's dedicated wheel index.
+
+echo ""
+echo "Installing PyTorch for ROCm ($PYTORCH_ROCM)..."
+pip install torch torchvision --index-url "https://download.pytorch.org/whl/$PYTORCH_ROCM"
+
+# Verify PyTorch sees ROCm
+TORCH_HIP=$(python3 -c "import torch; print(torch.version.hip or 'None')" 2>&1) || TORCH_HIP="FAILED"
+if [[ "$TORCH_HIP" == "None" ]] || [[ "$TORCH_HIP" == "FAILED" ]]; then
+    echo ""
+    echo "ERROR: PyTorch installed but does not see ROCm (torch.version.hip=$TORCH_HIP)."
+    echo "       The wrong wheel may have been installed."
+    echo "       Try: pip install torch --index-url https://download.pytorch.org/whl/rocm6.2"
+    exit 1
+fi
+echo "PyTorch ROCm backend: $TORCH_HIP ✓"
+
+# ── Step 7: Install vLLM ─────────────────────────────────────
+# vLLM should detect the ROCm PyTorch and install the matching backend.
+# If it installs a CUDA build, we fall back to building from source.
 
 echo ""
 echo "Installing vLLM..."
 pip install vllm
 
-# ── Step 7: Verify ───────────────────────────────────────────
+# ── Step 8: Verify ───────────────────────────────────────────
 
 echo ""
 echo "======================================================"
@@ -133,16 +166,32 @@ echo "  venv:    $VENV_DIR"
 echo ""
 
 if [[ "$VLLM_VER" == *"FAILED"* ]] || [[ "$TORCH_VER" == *"FAILED"* ]]; then
-    echo "  WARNING: Something failed. vLLM may need to be built from source."
-    echo "  Try:"
-    echo "    pip install wheel packaging ninja cmake"
-    echo "    git clone https://github.com/vllm-project/vllm.git /tmp/vllm-src"
-    echo "    cd /tmp/vllm-src"
-    echo "    VLLM_TARGET_DEVICE=rocm pip install -e ."
+    echo "  WARNING: Import failed. vLLM may need to be built from source for ROCm."
     echo ""
-    echo "  This will take 30+ minutes but produces a ROCm-native build."
-else
-    echo "  Setup complete! To use:"
-    echo "    bash run_vllm.sh --env $VENV_DIR"
+    echo "  Attempting source build (this takes 20-40 minutes)..."
+    echo ""
+    pip install wheel packaging ninja cmake
+    VLLM_SRC="/tmp/vllm-src-$$"
+    git clone --depth 1 https://github.com/vllm-project/vllm.git "$VLLM_SRC"
+    cd "$VLLM_SRC"
+    VLLM_TARGET_DEVICE=rocm pip install -e .
+    cd -
+
+    # Re-verify
+    VLLM_VER=$(python3 -c "import vllm; print(vllm.__version__)" 2>&1) || VLLM_VER="IMPORT FAILED"
+    echo ""
+    echo "  After source build:"
+    echo "  vLLM:    $VLLM_VER"
+    if [[ "$VLLM_VER" == *"FAILED"* ]]; then
+        echo "  ERROR: vLLM source build also failed. Manual debugging needed."
+        exit 1
+    fi
 fi
+
+echo ""
+echo "  Setup complete! To launch vLLM:"
+echo "    bash run_vllm.sh --env $VENV_DIR"
+echo ""
+echo "  Or set as default (no --env needed):"
+echo "    export VLLM_ENV=$VENV_DIR"
 echo "======================================================"

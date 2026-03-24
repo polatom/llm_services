@@ -35,9 +35,10 @@ WORK_BASE="/lnet/work/people/$USER"
 HF_CACHE="${HF_CACHE:-$WORK_BASE/.cache/huggingface}"
 
 # Which vLLM environment to use:
-#   "hrabal" = Hrabal's pre-compiled env (default, fast)
-#   path     = your own venv path (e.g. /lnet/work/people/tpolak/.venvs/sprint-vllm-rocm)
-VLLM_ENV="${VLLM_ENV:-hrabal}"
+#   "auto"   = your own venv if it exists, else Hrabal's (default)
+#   "hrabal" = Hrabal's pre-compiled env
+#   path     = explicit venv path (e.g. /lnet/work/people/tpolak/.venvs/llm-services-vllm-rocm)
+VLLM_ENV="${VLLM_ENV:-auto}"
 
 # Parse CLI overrides
 while [[ $# -gt 0 ]]; do
@@ -92,8 +93,23 @@ rocm-smi --showid --showtemp --showuse 2>/dev/null || echo "WARNING: rocm-smi no
 
 # ── Python environment ───────────────────────────────────────
 
-if [ "$VLLM_ENV" = "hrabal" ]; then
-    VENV_PATH="/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1"
+OWN_VENV="$WORK_BASE/.venvs/llm-services-vllm-rocm"
+HRABAL_VENV="/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1"
+
+if [ "$VLLM_ENV" = "auto" ]; then
+    if [ -d "$OWN_VENV" ]; then
+        VENV_PATH="$OWN_VENV"
+        echo "Using your own venv (auto-detected)"
+    elif [ -d "$HRABAL_VENV" ]; then
+        VENV_PATH="$HRABAL_VENV"
+        echo "Using Hrabal's venv (auto-fallback; run setup_env.sh to create your own)"
+    else
+        echo "ERROR: No venv found."
+        echo "       Run setup_env.sh first to create one at $OWN_VENV"
+        exit 1
+    fi
+elif [ "$VLLM_ENV" = "hrabal" ]; then
+    VENV_PATH="$HRABAL_VENV"
     if [ ! -d "$VENV_PATH" ]; then
         echo "ERROR: Hrabal's vLLM env not found at $VENV_PATH"
         echo "       Use --env /path/to/your/venv or run setup_env.sh first."
