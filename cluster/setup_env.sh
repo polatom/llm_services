@@ -154,26 +154,26 @@ if [[ "$TORCH_HIP" == "None" ]] || [[ "$TORCH_HIP" == "FAILED" ]]; then
 fi
 echo "PyTorch ROCm backend: $TORCH_HIP ✓"
 
-# ── Step 7: Install vLLM ─────────────────────────────────────
-# WARNING: `pip install vllm` pulls in CUDA PyTorch as a dependency,
-# overwriting the ROCm version we just installed. We fix this by
-# reinstalling ROCm PyTorch afterwards to reclaim the correct backend.
+# ── Step 7: Install vLLM for ROCm (from source) ──────────────
+# The PyPI vLLM wheel is CUDA-only (compiled C extensions link against
+# libcudart). For AMD GPUs we must build from source with
+# VLLM_TARGET_DEVICE=rocm, which compiles the HIP/ROCm backend.
+# This takes ~20-40 minutes but only needs to happen once.
 
 echo ""
-echo "Installing vLLM (this will temporarily install CUDA PyTorch)..."
-pip install vllm
+echo "Installing vLLM build dependencies..."
+pip install wheel packaging ninja cmake
+
+VLLM_SRC="/tmp/vllm-rocm-build-$$"
+echo ""
+echo "Cloning vLLM source to $VLLM_SRC ..."
+git clone --depth 1 https://github.com/vllm-project/vllm.git "$VLLM_SRC"
 
 echo ""
-echo "Reinstalling PyTorch for ROCm (overwriting CUDA version pulled by vLLM)..."
-pip install torch torchvision torchaudio --index-url "https://download.pytorch.org/whl/$PYTORCH_ROCM" --force-reinstall --no-deps
-
-# Verify ROCm PyTorch is back
-TORCH_HIP=$(python3 -c "import torch; print(torch.version.hip or 'None')" 2>&1) || TORCH_HIP="FAILED"
-if [[ "$TORCH_HIP" == "None" ]] || [[ "$TORCH_HIP" == "FAILED" ]]; then
-    echo "ERROR: ROCm PyTorch reinstall failed (torch.version.hip=$TORCH_HIP)."
-    exit 1
-fi
-echo "PyTorch ROCm backend restored: $TORCH_HIP ✓"
+echo "Building vLLM for ROCm (this takes 20-40 minutes)..."
+cd "$VLLM_SRC"
+VLLM_TARGET_DEVICE=rocm pip install -e .
+cd -
 
 # ── Step 8: Verify ───────────────────────────────────────────
 
@@ -190,14 +190,13 @@ echo ""
 TORCH_HIP_FINAL=$(python3 -c "import torch; print(torch.version.hip or 'None')" 2>&1) || TORCH_HIP_FINAL="FAILED"
 
 if [[ "$VLLM_VER" == *"FAILED"* ]]; then
-    echo "  ERROR: vLLM import failed. Manual debugging needed."
-    echo "  Try: VLLM_TARGET_DEVICE=rocm pip install vllm --no-build-isolation"
+    echo "  ERROR: vLLM import failed. Check build output above for errors."
     exit 1
 fi
 
 if [[ "$TORCH_HIP_FINAL" == "None" ]] || [[ "$TORCH_HIP_FINAL" == "FAILED" ]]; then
     echo "  ERROR: PyTorch ROCm backend missing (torch.version.hip=$TORCH_HIP_FINAL)."
-    echo "  The ROCm PyTorch reinstall may have failed. Try manually:"
+    echo "  The vLLM source build may have overwritten ROCm PyTorch. Reinstall:"
     echo "    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/$PYTORCH_ROCM --force-reinstall --no-deps"
     exit 1
 fi
