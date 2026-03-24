@@ -162,17 +162,20 @@ echo "PyTorch ROCm backend: $TORCH_HIP ✓"
 
 echo ""
 echo "Installing vLLM build dependencies..."
-pip install wheel packaging ninja cmake
+pip install wheel packaging ninja cmake numpy setuptools-scm
 
 VLLM_SRC="/tmp/vllm-rocm-build-$$"
 echo ""
 echo "Cloning vLLM source to $VLLM_SRC ..."
-git clone --depth 1 https://github.com/vllm-project/vllm.git "$VLLM_SRC"
+# Full clone required — setuptools_scm needs git tags for version detection.
+git clone https://github.com/vllm-project/vllm.git "$VLLM_SRC"
 
 echo ""
 echo "Building vLLM for ROCm (this takes 20-40 minutes)..."
 cd "$VLLM_SRC"
-VLLM_TARGET_DEVICE=rocm pip install -e .
+# --no-build-isolation: use our ROCm PyTorch instead of a pip-created
+# isolated build env (which would pull in CUDA PyTorch).
+VLLM_TARGET_DEVICE=rocm pip install --no-build-isolation .
 cd -
 
 # ── Step 8: Verify ───────────────────────────────────────────
