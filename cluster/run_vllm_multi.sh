@@ -54,14 +54,17 @@ if [ ! -d /opt/rocm ]; then
     exit 1
 fi
 
+WORK_BASE="/lnet/work/people/$USER"
+
 export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64/:"${LD_LIBRARY_PATH:-}"
 export PATH=/opt/rocm/bin:"$PATH"
 export VLLM_TARGET_DEVICE=rocm
 export TORCHDYNAMO_DISABLE=1
+# Redirect Triton kernel cache from $HOME (5GB quota!) to /lnet/work
+export TRITON_CACHE_DIR="$WORK_BASE/.triton/cache"
+mkdir -p "$TRITON_CACHE_DIR" 2>/dev/null || true
 
 # ── Python environment ───────────────────────────────────────
-
-WORK_BASE="/lnet/work/people/$USER"
 OWN_VENV="$WORK_BASE/.venvs/llm-services-vllm-rocm"
 HRABAL_VENV="/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1"
 

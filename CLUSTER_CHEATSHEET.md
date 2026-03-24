@@ -265,6 +265,9 @@ rm -rf ~/.local/share/pip
 # HuggingFace cache (should be on /lnet/work, not $HOME)
 rm -rf ~/.cache/huggingface
 
+# Triton kernel cache (vLLM/ROCm writes here during startup!)
+rm -rf ~/.triton/cache
+
 # Python package installs that ended up in $HOME
 rm -rf ~/.local/lib/python*/site-packages
 
@@ -286,7 +289,8 @@ export TMPDIR=/lnet/work/people/$USER/.tmp
 export PIP_CACHE_DIR=/lnet/work/people/$USER/.cache/pip
 export HF_HOME=/lnet/work/people/$USER/.cache/huggingface
 export XDG_CACHE_HOME=/lnet/work/people/$USER/.cache
-mkdir -p "$TMPDIR" "$PIP_CACHE_DIR" "$HF_HOME"
+export TRITON_CACHE_DIR=/lnet/work/people/$USER/.triton/cache
+mkdir -p "$TMPDIR" "$PIP_CACHE_DIR" "$HF_HOME" "$TRITON_CACHE_DIR"
 ```
 
 ---

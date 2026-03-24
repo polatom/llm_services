@@ -108,6 +108,9 @@ elif [ -d /opt/rocm ]; then
     # --enforce-eager alone doesn't propagate to worker procs, and the Inductor
     # autotuner crashes on ROCm with 'KernelMetadata.cluster_dims' error.
     export TORCHDYNAMO_DISABLE=1
+    # Redirect Triton kernel cache from $HOME (5GB quota!) to /lnet/work
+    export TRITON_CACHE_DIR="$WORK_BASE/.triton/cache"
+    mkdir -p "$TRITON_CACHE_DIR" 2>/dev/null || true
 
     # GPU visibility: when using DP>1, vLLM spawns multiple engine core
     # processes and assigns GPUs internally. Setting HIP_VISIBLE_DEVICES
