@@ -194,7 +194,7 @@ echo "HF cache: $HF_HOME"
 # ── Write connection info ────────────────────────────────────
 # This file is read by connect.sh to auto-detect the tunnel target.
 
-CONN_FILE="$HOME/.sprint_vllm_connection"
+CONN_FILE="$WORK_BASE/.sprint_vllm_connection"
 cat > "$CONN_FILE" <<EOF
 VLLM_HOST=$(hostname)
 VLLM_PORT=$PORT

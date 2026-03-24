@@ -19,7 +19,8 @@
 set -euo pipefail
 
 SUBMIT_NODE="${LRC_SUBMIT_NODE:-lrc1.ufal.hide.ms.mff.cuni.cz}"
-CONN_FILE="$HOME/.sprint_vllm_connection"
+WORK_BASE="/lnet/work/people/$USER"
+CONN_FILE="$WORK_BASE/.sprint_vllm_connection"
 
 # ── Determine host and port ──────────────────────────────────
 
