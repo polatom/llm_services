@@ -88,10 +88,12 @@ fi
 source "$VENV_PATH/bin/activate" 2>/dev/null || true
 export PATH="$VENV_PATH/bin:$PATH"
 
-# HuggingFace cache
+# Keep ALL caches off $HOME (5 GB quota!)
 export HF_HOME="$WORK_BASE/.cache/huggingface"
 export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
-mkdir -p "$HF_HOME"
+export VLLM_NO_USAGE_STATS=1
+export XDG_CACHE_HOME="$WORK_BASE/.cache"
+mkdir -p "$HF_HOME" "$XDG_CACHE_HOME"
 
 # ── Print configuration ─────────────────────────────────────
 

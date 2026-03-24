@@ -236,13 +236,21 @@ fi
 python3 -c "import vllm; print(f'vLLM version: {vllm.__version__}')"
 python3 -c "import torch; print(f'PyTorch {torch.__version__}, ROCm: {torch.version.hip}')"
 
-# ── HuggingFace cache ────────────────────────────────────────
+# ── Caches — keep EVERYTHING off $HOME (5 GB quota) ─────────
 
 export HF_HOME="$HF_CACHE"
 export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
 mkdir -p "$HF_HOME"
+# Disable vLLM usage telemetry (writes to $HOME/.vllm/)
+export VLLM_NO_USAGE_STATS=1
+# Catch-all: redirect XDG cache base
+export XDG_CACHE_HOME="$WORK_BASE/.cache"
+mkdir -p "$XDG_CACHE_HOME"
 
-echo "HF cache: $HF_HOME"
+echo "HF cache:      $HF_HOME"
+echo "Triton cache:  ${TRITON_CACHE_DIR:-default}"
+echo "XDG cache:     $XDG_CACHE_HOME"
+echo "vLLM stats:    disabled"
 
 # ── Write connection info ────────────────────────────────────
 # This file is read by connect.sh to auto-detect the tunnel target.
