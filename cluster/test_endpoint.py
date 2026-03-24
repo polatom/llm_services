@@ -602,6 +602,7 @@ def test_ponk(base_urls, model: str, api_key: str,
             )
             content = resp["choices"][0]["message"]["content"]
             usage = resp.get("usage", {})
+            finish_reason = resp["choices"][0].get("finish_reason", "")
             clean = strip_code_fences(content)
             try:
                 parsed = json.loads(clean)
@@ -622,6 +623,8 @@ def test_ponk(base_urls, model: str, api_key: str,
                 "valid_json": valid, "annotations": len(annots),
                 "prompt_tokens": usage.get("prompt_tokens", 0),
                 "completion_tokens": usage.get("completion_tokens", 0),
+                "finish_reason": finish_reason,
+                "raw_tail": content[-300:] if not valid else "",
                 "error": None,
             }
         except Exception as e:
@@ -640,8 +643,9 @@ def test_ponk(base_urls, model: str, api_key: str,
         for fut in as_completed(futures):
             r = fut.result()
             lat = f"{r['latency']:.1f}s" if r["latency"] else "N/A"
+            reason = r.get("finish_reason", "")
             ok = f"{r['annotations']} annots" if r["valid_json"] else (
-                r["error"] or "bad JSON")
+                r["error"] or f"bad JSON (finish={reason})")
             tok = (f"{r['prompt_tokens']}+{r['completion_tokens']}tok"
                    if r["prompt_tokens"] else "")
             print(f"    chunk {r['chunk']:2d}  {r['chars']:>6,} chars  "
@@ -680,6 +684,16 @@ def test_ponk(base_urls, model: str, api_key: str,
         print(f"  Suggestion:  Try smaller chunks (--chunk-chars {chunk_chars // 2})"
               f" or fewer chunks to reduce output tokens.")
     print("=" * 60)
+
+    # Diagnostic: dump tail of first bad-JSON response to diagnose truncation
+    bad = [r for r in results if not r["valid_json"] and r.get("raw_tail")]
+    if bad:
+        first = sorted(bad, key=lambda r: r["chunk"])[0]
+        print()
+        print(f"  [DEBUG] Chunk {first['chunk']} raw output tail "
+              f"(last 300 chars, finish_reason={first.get('finish_reason','?')}):")
+        print(f"  ...{first['raw_tail']}")
+        print()
 
     return met_target and errors == 0
 
