@@ -18,42 +18,46 @@ ssh lrc2.ufal.hide.ms.mff.cuni.cz    # login/submit node 2
 
 ## GPU Hardware Inventory
 
+Each machine has **system RAM** (shared by CPU tasks) and **GPU memory** (per GPU card,
+used to hold model weights). For LLM serving, the bottleneck is GPU memory — the model
+must fit entirely in GPU memory. System RAM is used for data loading and tokenization.
+
 ### AMD GPUs (gpu-amd partition) — less contested
 
-| Node | GPUs | Model | VRAM | Notes |
-|---|---|---|---|---|
-| `tdll-8gpu5` | 8× | MI210 | 64 GB | Best for LLM serving (8 GPUs) |
-| `tdll-8gpu6` | 8× | MI210 | 64 GB | Best for LLM serving (8 GPUs) |
-| `tdll-8gpu7` | 8× | MI210 | 64 GB | Best for LLM serving (8 GPUs) |
-| `dll-4gpu5` | 4× | MI210 | 64 GB | Smaller node, still usable |
+| Node | GPUs | GPU Model | GPU Mem (each) | System RAM | Notes |
+|---|---|---|---|---|---|
+| `tdll-8gpu5` | 8× | MI210 | 64 GB | ~512 GB | Best for LLM serving (8 GPUs) |
+| `tdll-8gpu6` | 8× | MI210 | 64 GB | ~512 GB | Best for LLM serving (8 GPUs) |
+| `tdll-8gpu7` | 8× | MI210 | 64 GB | ~512 GB | Best for LLM serving (8 GPUs) |
+| `dll-4gpu5` | 4× | MI210 | 64 GB | ~256 GB | Only 4 GPUs — excluded by `-x` in srun |
 
 **Total: 28 AMD GPUs.** Uses ROCm stack (AMD's CUDA equivalent).
 
 ### NVIDIA GPUs (gpu-troja partition) — often busy
 
-| Node | GPUs | Model | VRAM | Compute Cap. | Notes |
+| Node | GPUs | GPU Model | GPU Mem (each) | System RAM | Notes |
 |---|---|---|---|---|---|
-| `tdll-4gpu1` | 4× | H100 | 95 GB | 9.0 | Fastest. Very contested. |
-| `tdll-8gpu1` | 8× | A100 | 40 GB | 8.0 | Good for LLMs at TP=2 |
-| `tdll-8gpu2` | 8× | A100 | 40 GB | 8.0 | Good for LLMs at TP=2 |
-| `tdll-3gpu[1-4]` | 3× | A40 | 48 GB | 8.6 | 4 nodes, 12 GPUs total |
-| `tdll-8gpu[3-4]` | 8× | Quadro P5000 | 16 GB | 6.1 | Too small for LLMs |
+| `tdll-4gpu1` | 4× | H100 | 95 GB | ~1 TB | Fastest. Very contested. |
+| `tdll-8gpu1` | 8× | A100 | 40 GB | ~512 GB | Good for LLMs at TP=2 |
+| `tdll-8gpu2` | 8× | A100 | 40 GB | ~512 GB | Good for LLMs at TP=2 |
+| `tdll-3gpu[1-4]` | 3× | A40 | 48 GB | ~256 GB | 4 nodes, 12 GPUs total |
+| `tdll-8gpu[3-4]` | 8× | Quadro P5000 | 16 GB | ~256 GB | Too small for LLMs |
 
 ### NVIDIA GPUs (gpu-ms partition) — often busy
 
-| Node | GPUs | Model | VRAM | Compute Cap. | Notes |
+| Node | GPUs | GPU Model | GPU Mem (each) | System RAM | Notes |
 |---|---|---|---|---|---|
-| `dll-3gpu[1-5]` | 3× | A40 | 48 GB | 8.6 | 5 nodes, 15 GPUs total |
-| `dll-4gpu3` | 4× | L40 | 48 GB | 8.9 | Newer than A40 |
-| `dll-4gpu4` | 4× | A40 | 48 GB | 8.6 | |
-| `dll-8gpu[1-2]` | 8× | A30 | 24 GB | 8.0 | Too small for 27B models |
-| `dll-8gpu4` | 8× | RTX A4000 | 16 GB | 8.6 | Too small for LLMs |
-| `dll-8gpu5` | 8× | Quadro RTX 5000 | 16 GB | 7.5 | Too small for LLMs |
-| `dll-10gpu2` | 10× | GeForce GTX 1080 Ti | 11 GB | 6.1 | Too small for LLMs |
+| `dll-3gpu[1-5]` | 3× | A40 | 48 GB | ~256 GB | 5 nodes, 15 GPUs total |
+| `dll-4gpu3` | 4× | L40 | 48 GB | ~256 GB | Newer than A40 |
+| `dll-4gpu4` | 4× | A40 | 48 GB | ~256 GB | |
+| `dll-8gpu[1-2]` | 8× | A30 | 24 GB | ~512 GB | Too small for 27B models |
+| `dll-8gpu4` | 8× | RTX A4000 | 16 GB | ~256 GB | Too small for LLMs |
+| `dll-8gpu5` | 8× | Quadro RTX 5000 | 16 GB | ~256 GB | Too small for LLMs |
+| `dll-10gpu2` | 10× | GeForce GTX 1080 Ti | 11 GB | ~256 GB | Too small for LLMs |
 
 ### Which GPU for which model?
 
-| Model | Size (bf16) | Min VRAM | Example configs |
+| Model | Size (bf16) | Min GPU Mem | Example configs |
 |---|---|---|---|
 | Gemma 3 27B | ~54 GB | 2× 40GB+ | H100 TP=1, A100 TP=2, MI210 TP=2, A40 TP=2 |
 | Gemma 3 12B | ~24 GB | 1× 48GB+ | Any 48GB+ GPU at TP=1, MI210 TP=1 |
