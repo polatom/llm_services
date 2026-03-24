@@ -87,6 +87,7 @@ echo "======================================================"
 
 export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64/:"${LD_LIBRARY_PATH:-}"
 export PATH=/opt/rocm/bin:"$PATH"
+export VLLM_TARGET_DEVICE=rocm
 
 # Tell vLLM which GPUs to use. Slurm assigns specific GPU IDs to our job
 # via SLURM_STEP_GPUS (interactive srun) or SLURM_JOB_GPUS (sbatch).
