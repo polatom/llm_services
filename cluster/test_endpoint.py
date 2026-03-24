@@ -540,7 +540,7 @@ def _build_ponk_messages(text_chunk: str) -> list:
     ]
 
 
-def test_ponk(base_url: str, model: str, api_key: str,
+def test_ponk(base_urls, model: str, api_key: str,
               doc_chars: int, chunk_chars: int, target_seconds: float) -> bool:
     """
     Simulate PONK module 3: large document → split into chunks → send concurrently.
@@ -576,8 +576,18 @@ def test_ponk(base_url: str, model: str, api_key: str,
               f"({len(c):,} chars)")
     print()
 
+    # Support both single URL (str) and list of URLs
+    if isinstance(base_urls, str):
+        base_urls = [base_urls]
+    num_servers = len(base_urls)
+    if num_servers > 1:
+        print(f"  Servers:    {num_servers} (round-robin distribution)")
+        print()
+
     def send_chunk(chunk_idx: int) -> dict:
         offset, text = chunks[chunk_idx]
+        # Round-robin: distribute chunks across servers
+        url = base_urls[chunk_idx % num_servers]
         messages = _build_ponk_messages(text)
         payload = {
             "model": model,
@@ -587,7 +597,7 @@ def test_ponk(base_url: str, model: str, api_key: str,
         }
         try:
             resp, latency = http_post(
-                f"{base_url}/v1/chat/completions", payload, api_key,
+                f"{url}/v1/chat/completions", payload, api_key,
                 timeout=300,
             )
             content = resp["choices"][0]["message"]["content"]
@@ -718,6 +728,13 @@ Examples:
         help=f"vLLM base URL (default: {DEFAULT_URL})",
     )
     parser.add_argument(
+        "--urls", nargs="+", default=None,
+        help="Multiple vLLM base URLs for multi-server mode (e.g. "
+             "--urls http://host:8421 http://host:8422). "
+             "Chunks are distributed round-robin across servers. "
+             "If not set, uses --url for all requests.",
+    )
+    parser.add_argument(
         "--model", default=DEFAULT_MODEL,
         help=f"Model name as shown by /v1/models (default: {DEFAULT_MODEL})",
     )
@@ -753,17 +770,28 @@ Examples:
 
     args = parser.parse_args()
 
+    # Build the list of server URLs
+    all_urls = args.urls if args.urls else [args.url]
+
     print()
     print("=" * 60)
     print("  vLLM Endpoint Test")
-    print(f"  URL:   {args.url}")
+    if len(all_urls) == 1:
+        print(f"  URL:   {all_urls[0]}")
+    else:
+        print(f"  URLs:  {len(all_urls)} servers")
+        for u in all_urls:
+            print(f"         {u}")
     print(f"  Model: {args.model}")
     print(f"  Mode:  {args.mode}")
     print("=" * 60)
     print()
 
-    # Health check first
-    healthy = test_health(args.url, args.model)
+    # Health check — verify all servers
+    healthy = True
+    for u in all_urls:
+        if not test_health(u, args.model):
+            healthy = False
 
     if args.mode == "health":
         sys.exit(0 if healthy else 1)
@@ -776,13 +804,13 @@ Examples:
 
     ok = False
     if args.mode == "single":
-        ok = test_single(args.url, args.model, args.api_key)
+        ok = test_single(all_urls[0], args.model, args.api_key)
     elif args.mode == "concurrent":
-        ok = test_concurrent(args.url, args.model, args.api_key, args.requests)
+        ok = test_concurrent(all_urls[0], args.model, args.api_key, args.requests)
     elif args.mode == "sprint":
-        ok = test_sprint(args.url, args.model, args.api_key, args.batch_size)
+        ok = test_sprint(all_urls[0], args.model, args.api_key, args.batch_size)
     elif args.mode == "ponk":
-        ok = test_ponk(args.url, args.model, args.api_key,
+        ok = test_ponk(all_urls, args.model, args.api_key,
                        args.doc_chars, args.chunk_chars, args.target_seconds)
 
     print()
