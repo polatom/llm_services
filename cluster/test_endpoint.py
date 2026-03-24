@@ -593,12 +593,12 @@ def test_ponk(base_urls, model: str, api_key: str,
             "model": model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         }
         try:
             resp, latency = http_post(
                 f"{url}/v1/chat/completions", payload, api_key,
-                timeout=300,
+                timeout=600,
             )
             content = resp["choices"][0]["message"]["content"]
             usage = resp.get("usage", {})
