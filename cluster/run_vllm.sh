@@ -298,4 +298,9 @@ fi
 # Enable verbose logging to see worker subprocess errors
 export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
 
+# Increase worker startup timeout for DP>1: 8 workers loading the model
+# simultaneously from NFS takes ~2 min (vs ~4s for a single worker).
+# Default vLLM timeout (~60s) is too short for this.
+export VLLM_RPC_TIMEOUT="${VLLM_RPC_TIMEOUT:-600}"
+
 exec vllm serve "${SERVE_ARGS[@]}"
