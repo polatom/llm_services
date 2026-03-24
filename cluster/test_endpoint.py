@@ -594,6 +594,8 @@ def test_ponk(base_urls, model: str, api_key: str,
             "messages": messages,
             "temperature": 0.2,
             "max_tokens": 8192,
+            "repetition_penalty": 1.15,
+            "frequency_penalty": 0.3,
         }
         try:
             resp, latency = http_post(
