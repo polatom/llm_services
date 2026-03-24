@@ -216,21 +216,72 @@ sacct -j <jobid> --format=JobID,Elapsed,MaxRSS,MaxVMSize  # resource usage
 
 | Path | Quota | Shared across nodes? | Use for |
 |---|---|---|---|
-| `$HOME` (~) | Small (~5 GB) | Yes (NFS) | Config, small files only |
-| `/lnet/work/people/$USER/` | ~50 GB | Yes (NFS) | Model weights, venvs, pip cache |
-| `/tmp/` on GPU node | Large | No (local) | Temp build files |
+| `$HOME` (~) | **Small (~5 GB)** | Yes (NFS) | Config, dotfiles only |
+| `/lnet/work/people/$USER/` | ~50 GB | Yes (NFS) | Model weights, venvs, pip cache, repos |
+| `/tmp/` on GPU node | Large | No (local) | Temp build files (lost on job end) |
 
-### Avoid quota issues
+### Check your quota
 
 ```bash
-# Check your usage
-du -sh /lnet/work/people/$USER/
-du -sh ~/.cache/
+# NFS quota (shows $HOME and /lnet/work)
+quota -s
+# Fields: blocks = used, quota = soft limit, limit = hard limit
+# If 'blocks' is near 'limit', you're out of space
 
-# Redirect pip and temp files to /lnet/work (put in .bashrc)
+# If quota command isn't available, use df:
+df -h ~                             # $HOME filesystem usage
+df -h /lnet/work/people/$USER/      # /lnet/work filesystem usage
+```
+
+### Check what's using space
+
+```bash
+# $HOME — should be < 5 GB total
+du -sh ~ 2>/dev/null                          # total $HOME usage
+du -sh ~/.cache ~/.local ~/.pip ~/.*cache* 2>/dev/null | sort -rh | head -10
+
+# /lnet/work — should be < 50 GB total
+du -sh /lnet/work/people/$USER/               # total work usage
+du -sh /lnet/work/people/$USER/*/ 2>/dev/null | sort -rh | head -10
+du -sh /lnet/work/people/$USER/.cache/huggingface/   # model weights (biggest)
+du -sh /lnet/work/people/$USER/.venvs/*/      # venvs
+
+# Find biggest files anywhere under your directories
+find ~ -maxdepth 4 -type f -size +50M 2>/dev/null | head -20
+find /lnet/work/people/$USER/ -maxdepth 4 -type f -size +100M 2>/dev/null | head -20
+```
+
+### Common $HOME space hogs (safe to delete)
+
+```bash
+# pip cache (often lands in $HOME by default!)
+rm -rf ~/.cache/pip
+rm -rf ~/.local/share/pip
+
+# HuggingFace cache (should be on /lnet/work, not $HOME)
+rm -rf ~/.cache/huggingface
+
+# Python package installs that ended up in $HOME
+rm -rf ~/.local/lib/python*/site-packages
+
+# Failed pip builds / temp files
+rm -rf /tmp/pip-* ~/.tmp/pip-*
+
+# Old Python bytecode
+find ~ -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
+
+# Git garbage collection (reduce .git bloat)
+cd /lnet/work/people/$USER/llm_services && git gc --aggressive
+```
+
+### Prevent future quota issues (add to ~/.bashrc)
+
+```bash
+# Redirect everything large to /lnet/work
 export TMPDIR=/lnet/work/people/$USER/.tmp
 export PIP_CACHE_DIR=/lnet/work/people/$USER/.cache/pip
 export HF_HOME=/lnet/work/people/$USER/.cache/huggingface
+export XDG_CACHE_HOME=/lnet/work/people/$USER/.cache
 mkdir -p "$TMPDIR" "$PIP_CACHE_DIR" "$HF_HOME"
 ```
 
