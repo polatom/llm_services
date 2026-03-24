@@ -108,10 +108,22 @@ elif [ -d /opt/rocm ]; then
     # --enforce-eager alone doesn't propagate to worker procs, and the Inductor
     # autotuner crashes on ROCm with 'KernelMetadata.cluster_dims' error.
     export TORCHDYNAMO_DISABLE=1
-    export HIP_VISIBLE_DEVICES="${GPU_SLURM:-}"
-    unset ROCR_VISIBLE_DEVICES 2>/dev/null || true
+
+    # GPU visibility: when using DP>1, vLLM spawns multiple engine core
+    # processes and assigns GPUs internally. Setting HIP_VISIBLE_DEVICES
+    # to specific Slurm GPU IDs can confuse this. For DP>1, expose all
+    # GPUs and let vLLM handle assignment.
+    if [ "$DATA_PARALLEL" -gt 1 ]; then
+        # Unset restrictive GPU masks — let vLLM see all GPUs
+        unset HIP_VISIBLE_DEVICES 2>/dev/null || true
+        unset ROCR_VISIBLE_DEVICES 2>/dev/null || true
+        echo "GPU visibility: ALL (DP=$DATA_PARALLEL — vLLM manages assignment)"
+    else
+        export HIP_VISIBLE_DEVICES="${GPU_SLURM:-}"
+        unset ROCR_VISIBLE_DEVICES 2>/dev/null || true
+        echo "GPU visibility: HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-'(all)'}"
+    fi
     echo "GPU vendor:  AMD (ROCm)"
-    echo "GPUs visible: ${HIP_VISIBLE_DEVICES:-'(all — not in Slurm?)'}"
     rocm-smi --showid --showtemp --showuse 2>/dev/null || echo "WARNING: rocm-smi not available"
 
 else
@@ -271,5 +283,8 @@ fi
 if [ "$DATA_PARALLEL" -gt 1 ]; then
     SERVE_ARGS+=(--data-parallel-size "$DATA_PARALLEL")
 fi
+
+# Enable verbose logging to see worker subprocess errors
+export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
 
 exec vllm serve "${SERVE_ARGS[@]}"
