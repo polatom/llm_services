@@ -38,6 +38,9 @@ MAX_NUM_SEQS="${MAX_NUM_SEQS:-256}"
 TENSOR_PARALLEL="${TENSOR_PARALLEL:-2}"   # GPUs per replica
 DATA_PARALLEL="${DATA_PARALLEL:-4}"       # Number of replicas
 DTYPE="${DTYPE:-auto}"
+# ROCm: torch.compile/Inductor fails with 'cluster_dims' error.
+# Enforce eager mode until this is fixed upstream.
+ENFORCE_EAGER="${ENFORCE_EAGER:-true}"
 
 # Where to cache HuggingFace model weights (large! ~54 GB for 27B)
 WORK_BASE="/lnet/work/people/$USER"
@@ -60,6 +63,8 @@ while [[ $# -gt 0 ]]; do
         --max-len)   MAX_MODEL_LEN="$2"; shift 2 ;;
         --max-seqs)  MAX_NUM_SEQS="$2"; shift 2 ;;
         --env)       VLLM_ENV="$2"; shift 2 ;;
+        --enforce-eager)  ENFORCE_EAGER=true; shift ;;
+        --no-enforce-eager) ENFORCE_EAGER=false; shift ;;
         *)           echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -224,6 +229,11 @@ SERVE_ARGS=(
     --dtype "$DTYPE"
     --trust-remote-code
 )
+
+if [ "$ENFORCE_EAGER" = "true" ]; then
+    SERVE_ARGS+=(--enforce-eager)
+    echo "Note: --enforce-eager enabled (ROCm torch.compile workaround)"
+fi
 
 # Only add data-parallel if > 1 (vLLM may not accept --data-parallel-size 1)
 if [ "$DATA_PARALLEL" -gt 1 ]; then
