@@ -344,45 +344,64 @@ Tuning knobs if the target isn't met:
 
 ## Model Options
 
-Models tested or recommended, sized for MI210 GPUs (64 GB each).
+**Note:** On ROCm (AMD MI210), `torch.compile` is broken (see "Known Issues"),
+so all models run in eager mode — **~2-3× slower than compiled NVIDIA**.
+This is the single biggest performance bottleneck on AMD hardware.
 
-**Note:** On ROCm, `torch.compile` is currently disabled (see "Known Issues"),
-so all models run in eager mode (~2-3× slower than compiled NVIDIA).
+### Models tested on AMD MI210 (8× 64 GB, ROCm, eager mode)
 
-| Model | Size (bf16) | GPUs (TP) | Replicas on 8× MI210 (DP) | Est. speed (eager) | PONK viable? | Notes |
+| Model | Size | TP | DP | Health | PONK result | Verdict |
 |---|---|---|---|---|---|---|
-| **Gemma 3 12B IT** | ~24 GB | 1 | 8 | ~35 tok/s | **Best bet** | Recommended. Good Czech, fast, 8 replicas. |
-| Gemma 3 27B IT | ~54 GB | 2 | 4 | ~16 tok/s | Too slow | Tested: PONK timed out at 300s (all chunks). |
-| Gemma 3 4B IT | ~8 GB | 1 | 8 | ~80 tok/s | Fast, low quality | May hallucinate JSON spans. |
-| Apertus 8B | ~16 GB | 1 | 8 | ~50 tok/s | Worth testing | Good Czech from Swiss AI. |
-| Qwen 2.5 14B Instruct | ~28 GB | 1 | 8 | ~30 tok/s | Worth testing | Strong JSON output. |
-| Apertus 70B FP8 | ~70 GB | 4 | 2 | ~10 tok/s | No | Too slow in eager mode. |
+| Gemma 3 27B IT | ~54 GB | 2 | 4 | ✅ | ❌ 300s timeout (all chunks) | Too slow in eager mode |
+| Gemma 3 12B IT | ~24 GB | 1 | 8 | ✅ | ❌ 600s timeout (all chunks) | Even slower than expected |
+| Apertus 8B | ~16 GB | 1 | 8 | ✅ | ❌ 5/32 valid (1500-char chunks) | Degenerates into `.Qt.Qt.Qt...` repetition |
 
-### Why Gemma 12B?
+### Detailed test results (March 2026)
 
-- Same architecture as 27B → same setup, no script changes
-- Fits on **1 MI210** (24 GB < 64 GB) → TP=1, DP=8 (8 replicas)
-- ~2× faster per token than 27B + 2× more replicas = **~4× total throughput**
-- Still good Czech and JSON output quality for structured annotation tasks
-- Not gated on HuggingFace (no HF_TOKEN needed)
+**Gemma 3 27B IT** on tdll-8gpu6 (TP=2, DP=4, eager):
+- Health check: ✅
+- Single request: ✅ (~16 tok/s per replica)
+- PONK (9 chunks, 5k chars): ❌ All chunks timed out at 300s
 
-### Test results (March 2026)
+**Apertus 8B** on tdll-8gpu6 (TP=1, DP=8, eager):
+- Health check: ✅
+- Aggregate throughput: ~262 tok/s across 8 replicas
+- PONK (32 chunks, 1.5k chars): ❌ Only 5/32 valid JSON
+  - 5 chunks completed correctly (9-17 annotations each)
+  - 3 chunks returned malformed JSON (finish_reason=stop)
+  - 24 chunks hit max_tokens=8192, output was repetitive garbage (`.Qt.Qt.Qt...`)
+  - Root cause: model too small for complex structured annotation task
 
-| Model | Node | Config | Health | Single | PONK (30s target) |
-|---|---|---|---|---|---|
-| Gemma 3 27B IT | tdll-8gpu6 (MI210) | TP=2, DP=4, eager | ✅ | ✅ (~16 tok/s) | ❌ 300s timeout |
-| Gemma 3 12B IT | tdll-8gpu? (MI210) | TP=1, DP=8, eager | — | — | **TODO** |
+**Gemma 3 12B IT** on tdll-8gpu6 (TP=1, DP=8, eager):
+- Health check: ✅
+- PONK (9 chunks, 5k chars): ❌ All 9 chunks timed out at 600s
+  - Model started generating but is extremely slow in eager mode on MI210
+  - Likely viable on NVIDIA with torch.compile (2-3× speedup)
+
+### Recommendations
+
+**For NVIDIA nodes** (torch.compile works, 2-3× faster):
+
+| Model | Size | TP | DP (8× A100) | DP (4× H100) | Gated? | PONK estimate |
+|---|---|---|---|---|---|---|
+| **Gemma 3 12B IT** | ~24 GB | 1 | 8 | 4 | Yes (HF token) | **~10-20s** ✓ |
+| Qwen 2.5 14B Instruct | ~30 GB | 1 | 8 | 4 | No | ~15-25s (est.) |
+| Gemma 3 27B IT | ~54 GB | 2 | 4 | 2 | Yes | ~30-60s (borderline) |
+
+**For AMD MI210** (eager mode only):
+- No model is currently viable for PONK's 30s target
+- Would need torch.compile fix (PyTorch/Triton bug) or INT4 quantization
 
 > **Triton warning:** Some models fail on ROCm due to a Triton build issue.
-> Gemma 3 27B works. If a model won't start, this may be why.
+> Gemma 3 27B and 12B work. Apertus 8B works. If a model won't start, this may be why.
 
 ---
 
 ## Known Issues & Backlog
 
-### `torch.compile` broken on ROCm (CRITICAL — backlog)
+### `torch.compile` broken on ROCm (CRITICAL — blocking PONK on AMD)
 
-**Status:** Workaround applied. Proper fix deferred.
+**Status:** Confirmed still broken as of PyTorch 2.9.1 + ROCm 6.4. Workaround applied.
 
 **Problem:** PyTorch's `torch._inductor` autotuner crashes on ROCm MI210 with:
 ```
