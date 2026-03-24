@@ -1,7 +1,8 @@
 # LLM Deployment on the UFAL Cluster
 
 Self-hosted LLM inference for SPRINT and PONK module 3, running on the UFAL
-compute cluster with AMD Instinct MI210 GPUs.
+compute cluster. Primary target: AMD MI210 GPUs (ROCm), with NVIDIA fallback.
+See also: `../CLUSTER_CHEATSHEET.md` for general cluster commands and hardware inventory.
 
 ---
 
@@ -20,13 +21,17 @@ can evaluate Czech legal/academic texts without relying on external APIs
 ### Current status
 
 - [x] Cluster access (ssh lrc1.ufal.hide.ms.mff.cuni.cz)
-- [x] Deployment scripts ready (run_vllm.sh, setup_env.sh, connect.sh)
+- [x] Deployment scripts ready (run_vllm.sh, setup_env.sh, connect.sh, submit_vllm.sh)
 - [x] AMD MI210 / ROCm environment tested
-- [x] test_endpoint.py created
-- [ ] **Deploy Gemma 3 27B** — start vLLM, verify with test_endpoint.py
+- [x] test_endpoint.py created (health, single, concurrent, sprint, ponk modes)
+- [x] **Gemma 3 27B deployed on MI210** — vLLM starts, health check OK, single requests work
+- [x] ROCm workarounds applied (see "Known Issues" below)
+- [ ] ~~PONK throughput test~~ — **FAILED** with Gemma 27B on MI210 (all 9 chunks timed out at 300s in eager mode)
+- [ ] **Next: Deploy Gemma 3 12B on MI210** — TP=1, DP=8 for ~4× throughput
+- [ ] Re-run PONK throughput test with Gemma 12B
 - [ ] **App endpoint** — confirm SPRINT/PONK VMs can reach `<gpu-node>:8421` directly
-- [ ] PONK throughput test — 40k-char document in ≤30s (via chunk splitting)
 - [ ] Production integration (SPRINT/PONK .env pointing at the endpoint)
+- [ ] **Backlog:** Get `torch.compile` working on ROCm (see "Known Issues")
 
 ---
 
@@ -84,19 +89,31 @@ reach the cluster GPU nodes directly — no SSH tunnel or reverse proxy needed.
 If you've done this before and just need the commands:
 
 ```bash
-# 1. Get a GPU node
+# 1. Get a GPU node (AMD MI210 — less contested than NVIDIA)
 ssh lrc1.ufal.hide.ms.mff.cuni.cz
-srun -p gpu-amd -c 16 -G 8 --mem=64G -x dll-4gpu5 -t 30-00 --pty bash
+srun -p gpu-amd -c 16 -G 8 --mem=64G -x dll-4gpu5 -t 8:00:00 --pty bash
 
 # 2. Start vLLM (on the GPU node)
 cd /lnet/work/people/$USER/llm_services/cluster
-bash run_vllm.sh
+git pull
+
+# Gemma 12B — recommended (faster, fits 1 GPU, 8 replicas)
+bash run_vllm.sh --model google/gemma-3-12b-it --tp 1 --dp 8
+
+# Or Gemma 27B — higher quality but slower (needs 2 GPUs per replica)
+# bash run_vllm.sh --model google/gemma-3-27b-it --tp 2 --dp 4
+
 # Wait for: "Uvicorn running on http://0.0.0.0:8421"
 
-# 3. Test it (second terminal on same GPU node, or from lrc1)
-python3 test_endpoint.py --url http://<gpu-node>:8421 --mode single
+# 3. Test it (from lrc1 or another terminal)
+python3 test_endpoint.py --url http://<gpu-node>:8421 --mode health
+python3 test_endpoint.py --url http://<gpu-node>:8421 --mode ponk
 
-# 4. SSH tunnel (from your local machine or app VM)
+# 4. Or submit as a background job (no interactive terminal needed)
+bash submit_vllm.sh --partition gpu-amd --gpus 8 --tp 1 --dp 8 \
+     --model google/gemma-3-12b-it --time 8:00:00
+
+# 5. SSH tunnel (from your laptop, outside UFAL network)
 ssh -N -L 8421:<gpu-node>:8421 lrc1.ufal.hide.ms.mff.cuni.cz
 # Now http://localhost:8421/v1/chat/completions is available
 ```
@@ -327,16 +344,111 @@ Tuning knobs if the target isn't met:
 
 ## Model Options
 
-Models tested or recommended, sized for MI210 GPUs (64 GB each):
+Models tested or recommended, sized for MI210 GPUs (64 GB each).
 
-| Model | Size | GPUs (TP) | Replicas on 8 GPUs (DP) | Notes |
-|---|---|---|---|---|
-| **Gemma 3 27B IT** | 27B | 2 | 4 | Good Czech, confirmed working. Default. |
-| Apertus 8B | 8B | 1 | 8 | Fastest, but lower quality. |
-| Apertus 70B FP8 | 70B | 4 | 2 | Highest quality, may have Triton/ROCm issues. |
+**Note:** On ROCm, `torch.compile` is currently disabled (see "Known Issues"),
+so all models run in eager mode (~2-3× slower than compiled NVIDIA).
+
+| Model | Size (bf16) | GPUs (TP) | Replicas on 8× MI210 (DP) | Est. speed (eager) | PONK viable? | Notes |
+|---|---|---|---|---|---|---|
+| **Gemma 3 12B IT** | ~24 GB | 1 | 8 | ~35 tok/s | **Best bet** | Recommended. Good Czech, fast, 8 replicas. |
+| Gemma 3 27B IT | ~54 GB | 2 | 4 | ~16 tok/s | Too slow | Tested: PONK timed out at 300s (all chunks). |
+| Gemma 3 4B IT | ~8 GB | 1 | 8 | ~80 tok/s | Fast, low quality | May hallucinate JSON spans. |
+| Apertus 8B | ~16 GB | 1 | 8 | ~50 tok/s | Worth testing | Good Czech from Swiss AI. |
+| Qwen 2.5 14B Instruct | ~28 GB | 1 | 8 | ~30 tok/s | Worth testing | Strong JSON output. |
+| Apertus 70B FP8 | ~70 GB | 4 | 2 | ~10 tok/s | No | Too slow in eager mode. |
+
+### Why Gemma 12B?
+
+- Same architecture as 27B → same setup, no script changes
+- Fits on **1 MI210** (24 GB < 64 GB) → TP=1, DP=8 (8 replicas)
+- ~2× faster per token than 27B + 2× more replicas = **~4× total throughput**
+- Still good Czech and JSON output quality for structured annotation tasks
+- Not gated on HuggingFace (no HF_TOKEN needed)
+
+### Test results (March 2026)
+
+| Model | Node | Config | Health | Single | PONK (30s target) |
+|---|---|---|---|---|---|
+| Gemma 3 27B IT | tdll-8gpu6 (MI210) | TP=2, DP=4, eager | ✅ | ✅ (~16 tok/s) | ❌ 300s timeout |
+| Gemma 3 12B IT | tdll-8gpu? (MI210) | TP=1, DP=8, eager | — | — | **TODO** |
 
 > **Triton warning:** Some models fail on ROCm due to a Triton build issue.
 > Gemma 3 27B works. If a model won't start, this may be why.
+
+---
+
+## Known Issues & Backlog
+
+### `torch.compile` broken on ROCm (CRITICAL — backlog)
+
+**Status:** Workaround applied. Proper fix deferred.
+
+**Problem:** PyTorch's `torch._inductor` autotuner crashes on ROCm MI210 with:
+```
+'KernelMetadata' object has no attribute 'cluster_dims'
+```
+This is because `cluster_dims` is an NVIDIA Hopper/Blackwell feature (thread block
+clusters) that leaked into codepaths shared with ROCm. The error occurs in vLLM
+worker subprocesses even with `--enforce-eager`.
+
+**Current workaround:**
+- `TORCHDYNAMO_DISABLE=1` env var (set in `run_vllm.sh`) — completely disables
+  `torch.compile` in all subprocesses
+- `--enforce-eager` flag — tells vLLM not to use CUDA graphs
+- These together mean all models run in **eager mode**, which is ~2-3× slower
+
+**What fixing this would unlock:**
+- ~2-3× faster generation on MI210 → Gemma 27B might meet PONK's 30s target
+- CUDA graph support → reduced kernel launch overhead
+- Would make AMD a truly competitive option vs NVIDIA for LLM serving
+
+**Potential fix approaches (not yet attempted):**
+1. **Stub out `cluster_dims`** in PyTorch Inductor — medium effort, fragile
+2. **Rebuild PyTorch from source** with ROCm patches — 2-4h build, may break other things
+3. **Use AMD's Triton fork** — they may have fixed this, untested
+4. **Wait for PyTorch 2.6+** — AMD is actively upstreaming fixes
+5. **Check Hrabal's vLLM env** — he may have solved this (his venv:
+   `/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1`,
+   accessible from GPU nodes only)
+
+### ROCm workarounds applied
+
+These are already handled by `run_vllm.sh` and `setup_env.sh`:
+
+1. **Build vLLM from source** — PyPI wheel is CUDA-only.
+   `VLLM_TARGET_DEVICE=rocm pip install --no-build-isolation .`
+2. **Install amdsmi from ROCm bundle** — PyPI version incompatible.
+   Copies from `/opt/rocm/share/amd_smi/`
+3. **Set `TORCHDYNAMO_DISABLE=1`** — disables torch.compile globally
+4. **Set `VLLM_TARGET_DEVICE=rocm`** — runtime platform detection
+5. **Patch `cuda_communicator.py`** — FlashInfer/CustomAllreduce/QuickAllReduce
+   are CUDA-only, wrapped in try/except. Script: `patches/fix_rocm_communicators.py`
+6. **Redirect pip/temp to `/lnet/work`** — `$HOME` has ~5 GB quota, not enough
+   for vLLM install. Use `PIP_CACHE_DIR` and `TMPDIR` env vars.
+7. **HF_TOKEN** — needed for gated models (Gemma 27B). Store at
+   `/lnet/work/people/$USER/.cache/huggingface/token`
+
+### NVIDIA alternative (tested, deprioritized)
+
+NVIDIA nodes (`gpu-troja`, `gpu-ms`) support `torch.compile` natively and would
+be ~3-5× faster, but they're heavily contested:
+- H100 (`tdll-4gpu1`): 4-day vLLM job by another user, couldn't get a slot
+- A100 (`tdll-8gpu[1-2]`): 7+ concurrent jobs, fully allocated
+- A40 nodes: also busy, and `pip install vllm` hits `$HOME` quota
+
+The `run_vllm.sh` script auto-detects NVIDIA vs ROCm and works on both.
+Revisit NVIDIA when queue pressure drops or for production deployment.
+
+### Resource management strategy
+
+Our use case (large model, occasional high-demand bursts) means we shouldn't
+hold GPUs 24/7. Current approach:
+
+- **Always set a time limit** (`-t 8:00:00`) — job auto-terminates, frees GPUs
+- **Use `submit_vllm.sh`** for background jobs — no interactive terminal needed
+- **Model startup is ~2-5 min** — acceptable for on-demand use
+- **AMD partition is less contested** — fewer queuing delays
 
 ---
 
@@ -344,8 +456,10 @@ Models tested or recommended, sized for MI210 GPUs (64 GB each):
 
 ### Useful Slurm commands
 
+See `../CLUSTER_CHEATSHEET.md` for comprehensive cluster commands.
+
 ```bash
-sinfo -p gpu-amd -o "%N %G %c %m %t"   # available GPUs
+sinfo -p gpu-amd -o "%N %G %c %m %t"   # available AMD GPUs
 squeue -u $USER                          # your running jobs
 scancel <jobid>                          # cancel a job
 scontrol show job <jobid>                # job details
@@ -353,14 +467,21 @@ scontrol show job <jobid>                # job details
 
 ### Disk usage
 
-Large files live under `/lnet/work/people/$USER/` (50 GB quota):
-- **Model weights:** `~/.cache/huggingface/` — Gemma 27B is ~54 GB
-- **venv:** `~/.venvs/sprint-vllm-rocm/` — ~2–5 GB
-- **pip cache:** `~/.cache/pip/` — ~1–3 GB
+Large files live under `/lnet/work/people/$USER/` (~50 GB quota).
+**`$HOME` has only ~5 GB** — never install packages there.
+
+- **Model weights:** `/lnet/work/people/$USER/.cache/huggingface/` — 12B is ~24 GB, 27B is ~54 GB
+- **venv (ROCm):** `/lnet/work/people/$USER/.venvs/llm-services-vllm-rocm/` — ~5 GB
+- **venv (CUDA):** `/lnet/work/people/$USER/.venvs/llm-services-vllm-cuda/` — ~3 GB
+- **pip cache:** `/lnet/work/people/$USER/.cache/pip/` — ~1–3 GB
 
 ```bash
 du -sh /lnet/work/people/$USER/.cache/huggingface
 du -sh /lnet/work/people/$USER/
+
+# IMPORTANT: redirect temp/pip to /lnet/work to avoid $HOME quota
+export TMPDIR=/lnet/work/people/$USER/.tmp
+export PIP_CACHE_DIR=/lnet/work/people/$USER/.cache/pip
 ```
 
 ### Troubleshooting
@@ -368,7 +489,8 @@ du -sh /lnet/work/people/$USER/
 **"No GPUs visible"** — You're on the login node, not a GPU node. Run `srun` first.
 ```bash
 echo $SLURM_STEP_GPUS    # should show GPU IDs like 0,1,2,...
-rocm-smi                  # should list MI210 GPUs
+rocm-smi                  # should list MI210 GPUs (AMD)
+nvidia-smi                # should list GPUs (NVIDIA)
 ```
 
 **GPU out of memory** — Lower `--max-len` (8192), `--max-seqs` (64),
@@ -377,10 +499,16 @@ or reduce DP replicas. Add `--kv-cache-dtype fp8` for KV cache quantization.
 **Model download fails** — Some models are gated (accept license on HuggingFace).
 Set `export HF_TOKEN=hf_xxxxx` before starting vLLM.
 
+**Disk quota exceeded** — You're writing to `$HOME`. Set `TMPDIR` and
+`PIP_CACHE_DIR` to `/lnet/work/people/$USER/...` (see Disk usage above).
+
 **Requests fail** — Check model name matches (`curl .../v1/models`).
 Check vLLM terminal for errors.
 
 **Port in use** — Another user on the same node. Pick another: `--port 8422`.
+
+**torch.compile crash on ROCm** — See "Known Issues" above. `TORCHDYNAMO_DISABLE=1`
+is already set by `run_vllm.sh`.
 
 ---
 
@@ -388,8 +516,11 @@ Check vLLM terminal for errors.
 
 | File | Description |
 |---|---|
-| `README.md` | This file — plan, guide, reference |
-| `run_vllm.sh` | Sets up ROCm env + starts vLLM server |
-| `setup_env.sh` | One-time setup: creates your own venv with vLLM for ROCm |
+| `README.md` | This file — deployment guide, test results, known issues |
+| `run_vllm.sh` | Launches vLLM server (auto-detects NVIDIA/ROCm) |
+| `submit_vllm.sh` | Submits vLLM as a background Slurm job (sbatch) |
+| `setup_env.sh` | One-time setup: creates venv with vLLM for ROCm |
 | `connect.sh` | SSH tunnel helper (run from your local machine) |
-| `test_endpoint.py` | Tests the endpoint with SPRINT-like Czech legal prompts |
+| `test_endpoint.py` | Tests endpoint: health, single, concurrent, sprint, ponk |
+| `patches/fix_rocm_communicators.py` | Patches CUDA-only imports for ROCm |
+| `../CLUSTER_CHEATSHEET.md` | General cluster commands and hardware inventory |
