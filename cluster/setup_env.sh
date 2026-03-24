@@ -22,6 +22,15 @@
 
 set -euo pipefail
 
+# ── Logging ────────────────────────────────────────────────────
+# Tee all output (stdout + stderr) to a timestamped log file.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="$SCRIPT_DIR/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/setup_env_$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "Log file: $LOG_FILE"
+
 # ── Paths ────────────────────────────────────────────────────
 # Everything goes under /lnet/work (50 GB quota) instead of $HOME
 # to avoid filling the home directory quota.
