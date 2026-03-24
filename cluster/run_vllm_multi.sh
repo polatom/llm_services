@@ -132,14 +132,13 @@ for i in $(seq 0 $((NUM_GPUS - 1))); do
 
     echo "Starting server $i: GPU=$i, port=$PORT, log=$GPU_LOG"
 
-    # Use a subshell with explicit exports for reliable GPU pinning.
-    # Set BOTH HIP_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES because
-    # ROCm's HIP compatibility layer sometimes uses CUDA_VISIBLE_DEVICES.
-    (
-        export HIP_VISIBLE_DEVICES="$i"
-        export ROCR_VISIBLE_DEVICES="$i"
-        export CUDA_VISIBLE_DEVICES="$i"
-        exec vllm serve "$MODEL" \
+    # Pin GPU via env command for a clean environment.
+    # HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES both work on ROCm.
+    # CUDA_VISIBLE_DEVICES does NOT work on ROCm (ignored).
+    env \
+        HIP_VISIBLE_DEVICES="$i" \
+        ROCR_VISIBLE_DEVICES="$i" \
+        vllm serve "$MODEL" \
             --host 0.0.0.0 \
             --port "$PORT" \
             --tensor-parallel-size 1 \
@@ -147,15 +146,15 @@ for i in $(seq 0 $((NUM_GPUS - 1))); do
             --max-num-seqs "$MAX_NUM_SEQS" \
             --dtype "$DTYPE" \
             --enforce-eager \
-            --trust-remote-code
-    ) > "$GPU_LOG" 2>&1 &
+            --trust-remote-code \
+            > "$GPU_LOG" 2>&1 &
 
     PIDS+=($!)
     echo "  PID: ${PIDS[-1]}"
 
-    # Stagger launches to reduce NFS and memory contention
+    # Stagger launches to reduce NFS and memory contention during model loading
     if [ "$i" -lt $((NUM_GPUS - 1)) ]; then
-        sleep 2
+        sleep 5
     fi
 done
 
