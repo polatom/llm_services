@@ -25,7 +25,7 @@ PARTITION="${PARTITION:-gpu-troja}"
 NODE="${NODE:-}"                        # empty = let Slurm pick
 GPUS="${GPUS:-1}"
 CPUS="${CPUS:-8}"
-MEM="${MEM:-32G}"
+MEM="${MEM:-0}"                        # 0 = all available (DP>1 loads multiple model copies concurrently)
 TIME="${TIME:-8:00:00}"                 # 8 hours default
 JOB_NAME="${JOB_NAME:-vllm-serve}"
 

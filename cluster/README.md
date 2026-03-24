@@ -91,7 +91,7 @@ If you've done this before and just need the commands:
 ```bash
 # 1. Get a GPU node (AMD MI210 — less contested than NVIDIA)
 ssh lrc1.ufal.hide.ms.mff.cuni.cz
-srun -p gpu-amd -c 16 -G 8 --mem=64G -x dll-4gpu5 -t 8:00:00 --pty bash
+srun -p gpu-amd -c 16 -G 8 --mem=0 -x dll-4gpu5 -t 8:00:00 --pty bash
 
 # 2. Start vLLM (on the GPU node)
 cd /lnet/work/people/$USER/llm_services/cluster
@@ -134,14 +134,14 @@ It's used to submit jobs to GPU nodes via Slurm (the cluster's job scheduler).
 ### Step 2: Request an interactive GPU job
 
 ```bash
-srun -p gpu-amd -c 16 -G 8 --mem=64G -x dll-4gpu5 -t 30-00 --pty bash
+srun -p gpu-amd -c 16 -G 8 --mem=0 -x dll-4gpu5 -t 30-00 --pty bash
 ```
 
 What each flag means:
 - `-p gpu-amd` — use the AMD GPU partition
 - `-c 16` — 16 CPU cores (for data loading / tokenization)
 - `-G 8` — 8 GPUs (all MI210s on a single node)
-- `--mem=64G` — 64 GB system RAM
+- `--mem=0` — all available system RAM (DP=8 loads 8 model copies concurrently, needs ~128 GB+)
 - `-x dll-4gpu5` — exclude this node (only has 4 GPUs, not 8)
 - `-t 30-00` — max wall time: 30 days (job killed after this)
 - `--pty bash` — interactive bash shell on the GPU node
