@@ -44,9 +44,11 @@ scontrol show node -o 2>/dev/null | while IFS= read -r line; do
     echo "$partitions" | grep -qE 'gpu-amd|gpu-troja|gpu-ms' || continue
 
     # Parse GPU info
+    # Gres format: gpu:type_name:COUNT(S:0-1)  e.g. gpu:amd_mi210:8(S:0-1)
+    # GresUsed:    gpu:type_name:COUNT(IDX:...)  e.g. gpu:amd_mi210:3(IDX:0-2)
     gres_used=$(echo "$line" | grep -oP 'GresUsed=\K\S+')
-    total_gpus=$(echo "$gres" | grep -oP 'gpu[^:]*:\K[0-9]+' | head -1)
-    used_gpus=$(echo "$gres_used" | grep -oP 'gpu[^:]*:\K[0-9]+' | head -1)
+    total_gpus=$(echo "$gres" | grep -oP 'gpu:[^:]+:\K[0-9]+' | head -1)
+    used_gpus=$(echo "$gres_used" | grep -oP 'gpu:[^:]+:\K[0-9]+' | head -1)
     [ -z "$total_gpus" ] && total_gpus=0
     [ -z "$used_gpus" ] && used_gpus=0
     free_gpus=$((total_gpus - used_gpus))
@@ -154,7 +156,7 @@ done
 your_jobs=$(squeue -u "$USER" --noheader 2>/dev/null | wc -l)
 if [ "$your_jobs" -gt 0 ]; then
     printf "\n${BOLD}Your jobs:${RESET}\n"
-    squeue -u "$USER" -o "  %-10i %-12P %-16j %-3t %-12M %-12N" 2>/dev/null
+    squeue -u "$USER" 2>/dev/null | sed 's/^/  /'
 fi
 
 printf "\n${DIM}Tip: bash cluster/cluster_status.sh --free  (show only nodes with free GPUs)${RESET}\n\n"
