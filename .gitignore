@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Results (large, regeneratable)
+results/*.json
+results/*.jsonl
+!results/.gitkeep
+
+# Slurm logs
+slurm-*.out
+cluster/slurm-*.out
+
+# Environment
+.env
+*.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo

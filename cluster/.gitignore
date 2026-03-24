@@ -1,0 +1,3 @@
+# SLURM job logs (generated on cluster)
+vllm_*.out
+vllm_*.err

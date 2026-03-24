@@ -1,0 +1,121 @@
+# LLM Stress Testing Configuration
+# ─────────────────────────────────────────────────────────────
+
+# UFAL AI API settings
+api:
+  endpoint: "https://ai.ufal.mff.cuni.cz/api/chat/completions"
+  # API key is read from UFAL_TP_APIKEY env var (loaded from project .env)
+  timeout_seconds: 120
+
+# Models to test (run with --model <key> or --all-models)
+models:
+  eurollm-22b:
+    id: "utter-project/EuroLLM-22B-Instruct-2512"
+    label: "EuroLLM 22B (vLLM)"
+    notes: "EU multilingual, recommended for Czech legal"
+
+  apertus-8b:
+    id: "VLLM-llm-server2.swiss-ai/Apertus-8B-Instruct-2509"
+    label: "Apertus 8B (vLLM)"
+    notes: "Fast, quality TBD"
+
+  apertus-70b:
+    id: "Apertus-70B-8b_4x3090.RedHatAI/Apertus-70B-Instruct-2509-FP8-dynamic"
+    label: "Apertus 70B FP8 (vLLM, 4x3090)"
+    notes: "High quality, slower"
+
+  llama33-ollama:
+    id: "LLM3-AMD-MI210.llama3.3:latest"
+    label: "Llama 3.3 70B (Ollama, MI210)"
+    notes: "Currently configured as UFAL_TP, no batching"
+
+  gemma3-12b:
+    id: "LLM6-2xRTX5000.gemma3:12b-it-qat"
+    label: "Gemma 3 12B (Ollama, 2xRTX5000)"
+    notes: "Mid-range, Ollama-served"
+
+  # ── OpenAI (TP's private account) ──
+  openai-tp:
+    id: "gpt-4o"
+    label: "GPT-4o (OpenAI TP)"
+    notes: "Personal OpenAI API key"
+    endpoint: "https://api.openai.com/v1/chat/completions"
+    api_key_env: "OPENAI_TP_APIKEY"
+
+  # ── Self-hosted on LRC cluster (AMD MI210 / ROCm, via SSH tunnel) ──
+  gemma-27b-cluster:
+    id: "google/gemma-3-27b-it"
+    label: "Gemma 3 27B IT (LRC vLLM, 8× MI210)"
+    notes: "Self-hosted, TP=2 DP=4, port 8421"
+    endpoint: "http://localhost:8421/v1/chat/completions"
+
+  apertus-8b-cluster:
+    id: "swiss-ai/Apertus-8B-Instruct-2509"
+    label: "Apertus 8B (LRC vLLM)"
+    notes: "Self-hosted on LRC cluster GPU node"
+
+  apertus-70b-cluster:
+    id: "RedHatAI/Apertus-70B-Instruct-2509-FP8-dynamic"
+    label: "Apertus 70B FP8 (LRC vLLM)"
+    notes: "Self-hosted on LRC cluster, 4+ GPUs"
+
+# LLM request parameters (matching the real app)
+llm_params:
+  temperature: 0.0
+  max_tokens: 8192
+
+# Test scenarios
+scenarios:
+  # Quick sanity check — 1 user, 1 evaluation, small doc
+  sanity:
+    users: 1
+    evals_per_user: 1
+    rules_per_eval: 6
+    sentences_per_eval: 10
+    stagger_seconds: 0
+    max_concurrency: 48
+
+  # Medium document — 1 user, 30 sentences (realistic text)
+  medium_doc:
+    users: 1
+    evals_per_user: 1
+    rules_per_eval: 6
+    sentences_per_eval: 30
+    stagger_seconds: 0
+    max_concurrency: 48
+
+  # Large document — 1 user, all available sentences
+  large_doc:
+    users: 1
+    evals_per_user: 1
+    rules_per_eval: 6
+    sentences_per_eval: 80
+    stagger_seconds: 0
+    max_concurrency: 48
+
+  # Moderate — 8 users, medium docs
+  moderate:
+    users: 8
+    evals_per_user: 2
+    rules_per_eval: 6
+    sentences_per_eval: 30
+    stagger_seconds: 3
+    max_concurrency: 48
+
+  # Full load — 15 users, Friday simulation, medium docs
+  full:
+    users: 15
+    evals_per_user: 2
+    rules_per_eval: 6
+    sentences_per_eval: 30
+    stagger_seconds: 2
+    max_concurrency: 48
+
+  # Peak burst — 15 users, all at once
+  peak:
+    users: 15
+    evals_per_user: 1
+    rules_per_eval: 6
+    sentences_per_eval: 30
+    stagger_seconds: 0
+    max_concurrency: 48
