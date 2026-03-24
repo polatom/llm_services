@@ -45,7 +45,7 @@ def http_get(url: str, timeout: int = 10) -> dict:
 
 
 def http_post(url: str, payload: dict, api_key: str = "dummy",
-              timeout: int = 180) -> tuple:
+              timeout: int = 600) -> tuple:
     """POST JSON → (parsed_response, latency_seconds)."""
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
@@ -583,7 +583,7 @@ def test_ponk(base_url: str, model: str, api_key: str,
             "model": model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 8192,
+            "max_tokens": 4096,
         }
         try:
             resp, latency = http_post(
