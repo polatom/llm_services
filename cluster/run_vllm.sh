@@ -108,12 +108,52 @@ else
     fi
 fi
 
-# Activate the venv — explicitly prepend bin/ to PATH in case the
-# activate script doesn't fully override the system python3.
+# Activate the venv — for uv-created venvs the activate script may not
+# fully work if the Python home isn't on PATH.  We handle this:
+#   1. Check pyvenv.cfg for the real Python home
+#   2. Prepend it to PATH so the venv's python3 symlink resolves
+#   3. Then activate + prepend venv bin as usual
+
+# If pyvenv.cfg specifies a home dir (uv/virtualenv do this), add it to PATH
+# so the venv's python3 symlink can resolve.
+PYVENV_CFG="$VENV_PATH/pyvenv.cfg"
+if [ -f "$PYVENV_CFG" ]; then
+    PYHOME=$(grep -E '^home\s*=' "$PYVENV_CFG" | sed 's/^home\s*=\s*//' | tr -d '[:space:]')
+    if [ -n "$PYHOME" ] && [ -d "$PYHOME" ]; then
+        export PATH="$PYHOME:$PATH"
+        echo "Python home (from pyvenv.cfg): $PYHOME"
+    fi
+fi
+
 source "$VENV_PATH/bin/activate" 2>/dev/null || true
 export PATH="$VENV_PATH/bin:$PATH"
 echo "Activated venv: $VENV_PATH"
-echo "Python:  $(which python3) ($(python3 --version 2>&1))"
+
+# Verify that python3 actually comes from the venv
+ACTIVE_PYTHON="$(which python3 2>/dev/null)"
+echo "Python:  $ACTIVE_PYTHON ($(python3 --version 2>&1))"
+
+if [[ "$ACTIVE_PYTHON" != "$VENV_PATH/bin/python3" ]]; then
+    # Check if the venv's python3 is a broken symlink
+    if [ -L "$VENV_PATH/bin/python3" ] && [ ! -e "$VENV_PATH/bin/python3" ]; then
+        LINK_TARGET=$(readlink -f "$VENV_PATH/bin/python3" 2>/dev/null || readlink "$VENV_PATH/bin/python3")
+        echo ""
+        echo "ERROR: venv's python3 is a broken symlink:"
+        echo "       $VENV_PATH/bin/python3 -> $LINK_TARGET"
+        echo "       The target Python is not installed on this node."
+        echo ""
+        echo "  Options:"
+        echo "    1. Ask Hrabal where Python 3.13 is installed, add it to PATH"
+        echo "    2. Use your own venv: bash setup_env.sh && bash run_vllm.sh --env /lnet/work/people/$USER/.venvs/sprint-vllm-rocm"
+        echo ""
+        echo "  Diagnostic info:"
+        ls -la "$VENV_PATH/bin/python"* 2>/dev/null || true
+        cat "$PYVENV_CFG" 2>/dev/null || true
+        exit 1
+    fi
+    echo "WARNING: python3 is not from the venv (expected $VENV_PATH/bin/python3)"
+    echo "         Continuing, but vLLM may not be importable."
+fi
 
 python3 -c "import vllm; print(f'vLLM version: {vllm.__version__}')"
 python3 -c "import torch; print(f'PyTorch {torch.__version__}, ROCm: {torch.version.hip}')"

@@ -89,7 +89,7 @@ ssh lrc1.ufal.hide.ms.mff.cuni.cz
 srun -p gpu-amd -c 16 -G 8 --mem=64G -x dll-4gpu5 -t 30-00 --pty bash
 
 # 2. Start vLLM (on the GPU node)
-cd /lnet/work/people/$USER/sprint/llm_stress_testing/cluster
+cd /lnet/work/people/$USER/llm_services/cluster
 bash run_vllm.sh
 # Wait for: "Uvicorn running on http://0.0.0.0:8421"
 
@@ -155,7 +155,7 @@ python3 -c "import vllm; print(vllm.__version__)"  # should print 0.13.x
 For independence from Hrabal's env (e.g. to pin a specific vLLM version):
 
 ```bash
-cd /lnet/work/people/$USER/sprint/llm_stress_testing/cluster
+cd /lnet/work/people/$USER/llm_services/cluster
 bash setup_env.sh
 # Then launch with: bash run_vllm.sh --env /lnet/work/people/$USER/.venvs/sprint-vllm-rocm
 ```
@@ -165,7 +165,7 @@ See `setup_env.sh` for full details (PyTorch ROCm wheels, building from source, 
 ### Step 4: Start the vLLM server
 
 ```bash
-cd /lnet/work/people/$USER/sprint/llm_stress_testing/cluster
+cd /lnet/work/people/$USER/llm_services/cluster
 bash run_vllm.sh
 ```
 
