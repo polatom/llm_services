@@ -227,12 +227,8 @@ sacct -j <jobid> --format=JobID,Elapsed,MaxRSS,MaxVMSize  # resource usage
 ### Check your quota
 
 ```bash
-# NFS quota (shows $HOME and /lnet/work)
-quota -s
-# Fields: blocks = used, quota = soft limit, limit = hard limit
-# If 'blocks' is near 'limit', you're out of space
-
-# If quota command isn't available, use df:
+# quota -s does NOT work on this cluster (NFS server doesn't export quota info)
+# Use df instead:
 df -h ~                             # $HOME filesystem usage
 df -h /lnet/work/people/$USER/      # /lnet/work filesystem usage
 ```
@@ -240,15 +236,21 @@ df -h /lnet/work/people/$USER/      # /lnet/work filesystem usage
 ### Check what's using space
 
 ```bash
-# $HOME — should be < 5 GB total
-du -sh ~ 2>/dev/null                          # total $HOME usage
-du -sh ~/.cache ~/.local ~/.pip ~/.*cache* 2>/dev/null | sort -rh | head -10
+# NOTE: df shows the whole 136T shared filesystem, not your personal usage.
+# du -sh /lnet/work/people/$USER/ is accurate but very slow on NFS.
+# Instead, check known large subdirs directly:
 
-# /lnet/work — should be < 50 GB total
-du -sh /lnet/work/people/$USER/               # total work usage
-du -sh /lnet/work/people/$USER/*/ 2>/dev/null | sort -rh | head -10
-du -sh /lnet/work/people/$USER/.cache/huggingface/   # model weights (biggest)
-du -sh /lnet/work/people/$USER/.venvs/*/      # venvs
+# Fast: check the directories that actually hold large files
+du -sh /lnet/work/people/$USER/.cache \
+       /lnet/work/people/$USER/.venvs \
+       /lnet/work/people/$USER/llm_services \
+       2>/dev/null
+
+# Drill into model cache (usually the biggest)
+du -sh /lnet/work/people/$USER/.cache/huggingface/hub/* 2>/dev/null | sort -rh
+
+# List venvs
+du -sh /lnet/work/people/$USER/.venvs/* 2>/dev/null | sort -rh
 
 # Find biggest files anywhere under your directories
 find ~ -maxdepth 4 -type f -size +50M 2>/dev/null | head -20
