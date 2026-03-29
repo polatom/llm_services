@@ -104,10 +104,9 @@ elif [ -d /opt/rocm ]; then
     export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64/:"${LD_LIBRARY_PATH:-}"
     export PATH=/opt/rocm/bin:"$PATH"
     export VLLM_TARGET_DEVICE=rocm
-    # Completely disable torch.compile/TorchDynamo in all subprocesses.
-    # --enforce-eager alone doesn't propagate to worker procs, and the Inductor
-    # autotuner crashes on ROCm with 'KernelMetadata.cluster_dims' error.
-    export TORCHDYNAMO_DISABLE=1
+    # NOTE: torch.compile now works on ROCm after patching cluster_dims.
+    # See: cluster/patches/fix_rocm_cluster_dims.py
+    # If you hit 'KernelMetadata.cluster_dims' errors, re-run the patch.
     # Redirect Triton kernel cache from $HOME (5GB quota!) to /lnet/work
     export TRITON_CACHE_DIR="$WORK_BASE/.triton/cache"
     mkdir -p "$TRITON_CACHE_DIR" 2>/dev/null || true
@@ -134,15 +133,11 @@ else
     echo "WARNING: No GPU runtime detected (no nvidia-smi, no /opt/rocm)"
 fi
 
-# Resolve enforce-eager: ROCm needs it (torch.compile broken), NVIDIA doesn't.
+# Resolve enforce-eager: default OFF (torch.compile works on both NVIDIA and ROCm).
+# Set --enforce-eager explicitly if you need to disable compilation.
 if [ "$ENFORCE_EAGER" = "auto" ]; then
-    if [ "$GPU_VENDOR" = "rocm" ]; then
-        ENFORCE_EAGER=true
-        echo "Enforce eager: ON (auto — ROCm torch.compile workaround)"
-    else
-        ENFORCE_EAGER=false
-        echo "Enforce eager: OFF (auto — NVIDIA torch.compile works)"
-    fi
+    ENFORCE_EAGER=false
+    echo "Enforce eager: OFF (auto — torch.compile enabled)"
 fi
 
 # ── Python environment ───────────────────────────────────────
