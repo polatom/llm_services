@@ -344,17 +344,17 @@ Tuning knobs if the target isn't met:
 
 ## Model Options
 
-**Note:** On ROCm (AMD MI210), `torch.compile` is broken (see "Known Issues"),
-so all models run in eager mode — **~2-3× slower than compiled NVIDIA**.
-This is the single biggest performance bottleneck on AMD hardware.
+**Note:** AMD MI210 is currently **blocked** by two issues (see Known Issues):
+1. `torch.compile` is disabled — models run in slow eager mode
+2. vLLM `0.18.1rc1.dev70` produces garbage output on ROCm even in eager mode
 
 ### Models tested on AMD MI210 (8× 64 GB, ROCm, eager mode)
 
-| Model | Size | TP | DP | Health | PONK result | Verdict |
-|---|---|---|---|---|---|---|
-| Gemma 3 27B IT | ~54 GB | 2 | 4 | ✅ | ❌ 300s timeout (all chunks) | Too slow in eager mode |
-| Gemma 3 12B IT | ~24 GB | 1 | 8 | ✅ | ❌ 600s timeout (all chunks) | Even slower than expected |
-| Apertus 8B | ~16 GB | 1 | 8 | ✅ | ❌ 5/32 valid (1500-char chunks) | Degenerates into `.Qt.Qt.Qt...` repetition |
+| Model | Size | TP | DP | Health | Output quality | PONK result | Verdict |
+|---|---|---|---|---|---|---|---|
+| Gemma 3 27B IT | ~54 GB | 2 | 4 | ✅ | ❌ garbage (vLLM bug) | ❌ 300s timeout | vLLM broken on ROCm |
+| Gemma 3 12B IT | ~24 GB | 1 | 8 | ✅ | ❌ garbage (vLLM bug) | ❌ all chunks bad | vLLM broken on ROCm |
+| Apertus 8B | ~16 GB | 1 | 8 | ✅ | ❌ garbage (vLLM bug) | ❌ 5/32 valid | vLLM broken on ROCm |
 
 ### Detailed test results (March 2026)
 
@@ -362,35 +362,37 @@ This is the single biggest performance bottleneck on AMD hardware.
 - Health check: ✅
 - Single request: ✅ (~16 tok/s per replica)
 - PONK (9 chunks, 5k chars): ❌ All chunks timed out at 300s
+- Note: tested before garbage-output bug was isolated
 
 **Apertus 8B** on tdll-8gpu6 (TP=1, DP=8, eager):
 - Health check: ✅
 - Aggregate throughput: ~262 tok/s across 8 replicas
 - PONK (32 chunks, 1.5k chars): ❌ Only 5/32 valid JSON
-  - 5 chunks completed correctly (9-17 annotations each)
-  - 3 chunks returned malformed JSON (finish_reason=stop)
-  - 24 chunks hit max_tokens=8192, output was repetitive garbage (`.Qt.Qt.Qt...`)
-  - Root cause: model too small for complex structured annotation task
+  - Output was repetitive garbage (`.Qt.Qt.Qt...`) or multilingual noise
+  - Root cause: vLLM 0.18.1rc1 ROCm bug (confirmed — see below)
 
 **Gemma 3 12B IT** on tdll-8gpu6 (TP=1, DP=8, eager):
 - Health check: ✅
-- PONK (9 chunks, 5k chars): ❌ All 9 chunks timed out at 600s
-  - Model started generating but is extremely slow in eager mode on MI210
-  - Likely viable on NVIDIA with torch.compile (2-3× speedup)
+- Simple `2+2` query: ❌ Returns `'4 Centres dinero LABELity HS gcc...'` (nonsense)
+- PONK (9 chunks, 5k chars): ❌ All 9 chunks bad JSON, multilingual garbage output
+- **HuggingFace transformers test (same node, same weights):** ✅ Returns `'4'` correctly
+- **Conclusion:** Model weights and ROCm runtime are fine. vLLM 0.18.1rc1.dev70 is broken on ROCm.
 
 ### Recommendations
 
-**For NVIDIA nodes** (torch.compile works, 2-3× faster):
+**For AMD MI210** — currently **blocked** until vLLM ROCm issue is resolved:
+- The model weights are correct, ROCm runtime is functional
+- vLLM 0.18.1rc1.dev70 (built from main branch) is broken on AMD ROCm
+- Fix: rebuild vLLM at a known-good ROCm-tested version (e.g. v0.6.x or v0.7.x)
+- See `docs/LLM_on_AMD.md` for IT consultation notes
+
+**For NVIDIA nodes** (torch.compile works, 2-3× faster, no vLLM bug):
 
 | Model | Size | TP | DP (8× A100) | DP (4× H100) | Gated? | PONK estimate |
 |---|---|---|---|---|---|---|
 | **Gemma 3 12B IT** | ~24 GB | 1 | 8 | 4 | Yes (HF token) | **~10-20s** ✓ |
 | Qwen 2.5 14B Instruct | ~30 GB | 1 | 8 | 4 | No | ~15-25s (est.) |
 | Gemma 3 27B IT | ~54 GB | 2 | 4 | 2 | Yes | ~30-60s (borderline) |
-
-**For AMD MI210** (eager mode only):
-- No model is currently viable for PONK's 30s target
-- Would need torch.compile fix (PyTorch/Triton bug) or INT4 quantization
 
 > **Triton warning:** Some models fail on ROCm due to a Triton build issue.
 > Gemma 3 27B and 12B work. Apertus 8B works. If a model won't start, this may be why.
@@ -399,37 +401,42 @@ This is the single biggest performance bottleneck on AMD hardware.
 
 ## Known Issues & Backlog
 
-### `torch.compile` broken on ROCm (CRITICAL — blocking PONK on AMD)
+### vLLM 0.18.1rc1 produces garbage output on ROCm (CRITICAL — currently blocking all AMD use)
 
-**Status:** Confirmed still broken as of PyTorch 2.9.1 + ROCm 6.4. Workaround applied.
+**Status:** Confirmed broken as of 2025-03-29. Root cause isolated.
+
+**Symptom:** All model responses are multilingual nonsense (e.g. `'4 Centres dinero LABELity HS gcc Conexion 이론 Flame'` for `2+2`). Both `torch.compile` enabled and eager mode affected.
+
+**Root cause:** vLLM `0.18.1rc1.dev70+gce57fd555` (built from main branch HEAD) has a broken ROCm inference path. The model weights themselves are fine — a direct HuggingFace transformers inference test on the same node with the same weights returns correct output (`4`).
+
+**Evidence:**
+- vLLM (eager mode, `TORCHDYNAMO_DISABLE=1`, `enforce_eager=True`): ❌ garbage output
+- HuggingFace transformers (same GPU, same weights, same dtype): ✅ correct output
+- ROCm runtime and model weights verified working
+
+**Fix required:** Rebuild vLLM from a version with known working ROCm support. The current install was built from the main branch tip, which is a pre-release. Stable ROCm support in vLLM was documented around v0.6–v0.7. See `docs/LLM_on_AMD.md` for IT consultation details.
+
+**Workaround:** None known — the bug is inside vLLM's ROCm attention/sampling kernels.
+
+### `torch.compile` broken on ROCm (secondary issue)
+
+**Status:** Patched but `torch.compile` corrupts model outputs anyway. Workaround applied.
 
 **Problem:** PyTorch's `torch._inductor` autotuner crashes on ROCm MI210 with:
 ```
 'KernelMetadata' object has no attribute 'cluster_dims'
 ```
-This is because `cluster_dims` is an NVIDIA Hopper/Blackwell feature (thread block
-clusters) that leaked into codepaths shared with ROCm. The error occurs in vLLM
-worker subprocesses even with `--enforce-eager`.
+This is an NVIDIA Hopper/Blackwell feature that leaked into shared ROCm codepaths.
+
+**Patch applied:** `cluster/patches/fix_rocm_cluster_dims.py` — makes `cluster_dims` access safe.
+However, even with the patch, `torch.compile` was found to corrupt model outputs.
 
 **Current workaround:**
-- `TORCHDYNAMO_DISABLE=1` env var (set in `run_vllm.sh`) — completely disables
-  `torch.compile` in all subprocesses
-- `--enforce-eager` flag — tells vLLM not to use CUDA graphs
-- These together mean all models run in **eager mode**, which is ~2-3× slower
+- `TORCHDYNAMO_DISABLE=1` env var (set in `run_vllm.sh`) — disables `torch.compile`
+- `--enforce-eager` flag — disables CUDA graphs
+- Models run in **eager mode**, which is ~2-3× slower
 
-**What fixing this would unlock:**
-- ~2-3× faster generation on MI210 → Gemma 27B might meet PONK's 30s target
-- CUDA graph support → reduced kernel launch overhead
-- Would make AMD a truly competitive option vs NVIDIA for LLM serving
-
-**Potential fix approaches (not yet attempted):**
-1. **Stub out `cluster_dims`** in PyTorch Inductor — medium effort, fragile
-2. **Rebuild PyTorch from source** with ROCm patches — 2-4h build, may break other things
-3. **Use AMD's Triton fork** — they may have fixed this, untested
-4. **Wait for PyTorch 2.6+** — AMD is actively upstreaming fixes
-5. **Check Hrabal's vLLM env** — he may have solved this (his venv:
-   `/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1`,
-   accessible from GPU nodes only)
+**Check Hrabal's env** — his venv (`/lnet/work/home-students-external/hrabal/uv_venv/3.13_vllm0.13_rocm6.4.1`) uses vLLM 0.13 which may not have the garbage-output bug and may have working ROCm support.
 
 ### ROCm workarounds applied
 
