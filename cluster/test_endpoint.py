@@ -379,76 +379,25 @@ def test_sprint(base_url: str, model: str, api_key: str,
 
 # PONK module 3 prompt template (speech act annotation of Czech legal text).
 # Mirrors ponk-app3/llm_client.py — the actual prompt the production app sends.
-PONK_SYSTEM_MESSAGE = (
-    "You are an expert legal document annotator. Your task is to analyze "
-    "Czech legal documents and provide structured JSON annotations. "
-    "Always respond with valid JSON only, no additional text."
-)
+PONK_SYSTEM_MESSAGE = "You are an expert legal document annotator. Respond ONLY with valid JSON. No extra text."
 
-PONK_USER_TEMPLATE = """# Task: Annotate Legal Document with Speech Acts
+PONK_USER_TEMPLATE = """Annotate this Czech legal text with speech act labels.
+The text is {text_length} characters long (offsets 0 to {text_length_minus1}).
+Return ONLY a JSON object with character offsets. Do NOT include the text itself in the output.
 
-You are an expert annotator tasked with identifying and labeling text spans in a legal advice document according to a predefined set of speech act categories. Your goal is to segment the document into meaningful spans and assign each span the most appropriate speech act label.
+Labels:
+01_Situace | 02_Kontext | 03_Postup | 04_Proces | 05_Podmínky | 06_Doporučení | 07_Odkazy | 08_Prameny | 09_Nezařaditelné
 
-## Speech Acts Definitions
+Rules:
+- Use COARSE spans (sentence-level or paragraph-level). Merge adjacent spans that share a label.
+- All offsets must be between 0 and {text_length}. Do NOT exceed the text length.
+- Spans must not overlap. Cover the entire document.
+- Aim for roughly 5–30 annotations total.
 
-### 01_Situace (Situation)
-Snippets of text indicating what situation (and goal) the advice applies to.
+Output (compact JSON, no extra whitespace):
+{{"annotations":[{{"start":0,"end":312,"label":"01_Situace"}},{{"start":312,"end":1847,"label":"05_Podmínky"}},…]}}
 
-### 02_Kontext (Context)
-Snippets of text giving the broader picture, for instance precedent cases or typical procedures and their outcomes.
-
-### 03_Postup (Procedure)
-Snippets of text describing what the recipient is advised to do.
-
-### 04_Proces (Process)
-Snippets of text describing the expected responses of authorities or other parties to steps taken by the recipient.
-
-### 05_Podminky (Conditions, options)
-Snippets of text specifying circumstances under which an action can or cannot be taken.
-
-### 06_Doporuceni (Recommendations)
-Snippets of text that recommend additional actions or compare the individual options with respect to their desired impact.
-
-### 07_Odkazy (Links)
-Explicit textual links to other documents in Frank Bold's knowledge base of legal advice.
-
-### 08_Prameny (References)
-References to external documents, particularly laws and regulations.
-
-### 09_Nezaraditelne (Not classified)
-Any other text.
-
-## Instructions
-
-1. Read through the entire document carefully
-2. Identify meaningful text spans that correspond to one of the speech act categories above
-3. Spans can be of any length (words, sentences, paragraphs) - prefer smaller, more granular spans
-4. Each category can and should be used multiple times throughout the document
-5. Spans must NOT overlap - each character position belongs to at most one annotation
-6. Every part of the document should ideally be covered by at least one annotation
-
-## Output Format
-
-Return a JSON object with this structure:
-{{
-  "annotations": [
-    {{
-      "start": 0,
-      "end": 100,
-      "label": "01_Situace"
-    }},
-    ...
-  ]
-}}
-
-Where:
-- "start": character offset where the span begins (inclusive, 0-indexed, relative to the chunk below)
-- "end": character offset where the span ends (exclusive)
-- "label": one of the speech act labels (01_Situace, 02_Kontext, etc.)
-
-IMPORTANT: Spans must NOT overlap.
-
-## Document to Annotate
+Document:
 
 {text}
 """
@@ -536,7 +485,11 @@ def _build_ponk_messages(text_chunk: str) -> list:
     """Build PONK-style chat messages for a text chunk."""
     return [
         {"role": "system", "content": PONK_SYSTEM_MESSAGE},
-        {"role": "user", "content": PONK_USER_TEMPLATE.format(text=text_chunk)},
+        {"role": "user", "content": PONK_USER_TEMPLATE.format(
+            text=text_chunk,
+            text_length=len(text_chunk),
+            text_length_minus1=len(text_chunk) - 1,
+        )},
     ]
 
 
