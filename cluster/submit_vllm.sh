@@ -63,6 +63,12 @@ if [ -n "$NODE" ]; then
     NODE_FLAG="#SBATCH -w $NODE"
 fi
 
+# Exclude dll-4gpu5 only on AMD partition (it only has 4 GPUs, not enough for DP=8)
+EXCLUDE_FLAG=""
+if [[ "$PARTITION" == "gpu-amd" ]]; then
+    EXCLUDE_FLAG="#SBATCH -x dll-4gpu5"
+fi
+
 # ── Generate sbatch script ────────────────────────────────────
 SBATCH_SCRIPT=$(mktemp /tmp/vllm_sbatch_XXXXXX.sh)
 
@@ -74,7 +80,7 @@ cat > "$SBATCH_SCRIPT" << SBATCH_EOF
 #SBATCH -c ${CPUS}
 #SBATCH --mem=${MEM}
 #SBATCH --time=${TIME}
-#SBATCH -x dll-4gpu5
+${EXCLUDE_FLAG}
 #SBATCH -o ${SCRIPT_DIR}/logs/vllm_%j.out
 #SBATCH -e ${SCRIPT_DIR}/logs/vllm_%j.err
 ${NODE_FLAG}
