@@ -99,6 +99,42 @@ significantly and the 30s target becomes achievable.
 | Repo | `/lnet/work/people/tpolak/llm_services` (also on GitHub: `polatom/llm_services`) |
 | Scripts | `cluster/run_vllm.sh`, `cluster/submit_vllm.sh`, `cluster/setup_env.sh` |
 
+## Interim Option: NVIDIA A40 While AMD Is Blocked
+
+While waiting for the AMD vLLM fix, we can run on NVIDIA A40 nodes which:
+- Support `torch.compile` natively (2-3× faster than AMD eager mode)
+- Use the existing CUDA venv (`/lnet/work/people/tpolak/.venvs/llm-services-vllm-cuda`)
+- Require no additional setup — `run_vllm.sh` auto-detects NVIDIA vs ROCm
+
+Nodes with A40 48GB (fit Gemma 12B at TP=1) that were **idle as of 2026-03-29**:
+- `tdll-3gpu[2-3]` (gpu-troja) — 3× A40 each
+- `dll-3gpu5` (gpu-ms) — 3× A40
+
+**Expected performance on A40 TP=1 DP=3 with torch.compile:**
+~60-80 tok/s per replica × 3 replicas = ~180-240 tok/s total.
+PONK: 9 chunks × ~500 output tokens ÷ 180 tok/s ≈ **~25s** — should meet the 30s target.
+
+**Command to try (run from login node):**
+```bash
+cd /lnet/work/people/tpolak/llm_services && git pull
+bash cluster/submit_vllm.sh \
+  --partition gpu-troja \
+  --gpus 3 \
+  --cpus 6 \
+  --mem 64G \
+  --time 2:00:00 \
+  --tp 1 \
+  --dp 3
+
+# Once all 3 "Application startup complete" messages appear:
+JOBID=$(squeue -u $USER --noheader -o '%i' | head -1)
+NODE=$(squeue -j $JOBID -o '%N' --noheader)
+python3 cluster/test_endpoint.py \
+  --url http://$NODE:8421 \
+  --model google/gemma-3-12b-it \
+  --mode ponk
+```
+
 ## Specific Questions for IT
 
 1. **Which vLLM version/commit does the UFAL AMD endpoint use?** We want to match it.
